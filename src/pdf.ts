@@ -18,7 +18,16 @@ export interface OutlineItem {
 export function loadPdf(source: string | ArrayBuffer): Promise<PDFDoc> {
   const params = typeof source === 'string' ? { url: source } : { data: source }
   // Font names (e.g. "Roboto-Bold") are needed to rebuild formatting for the Focused View.
-  return pdfjs.getDocument({ ...params, fontExtraProperties: true }).promise
+  return pdfjs.getDocument({
+    ...params,
+    fontExtraProperties: true,
+    // Decoders and font data, copied into public/ by scripts/copy-pdfjs-assets.mjs.
+    wasmUrl: '/pdfjs/wasm/',
+    cMapUrl: '/pdfjs/cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: '/pdfjs/standard_fonts/',
+    iccUrl: '/pdfjs/iccs/',
+  }).promise
 }
 
 /** Resolves the PDF's bookmarks into a tree with 1-based page numbers. */
@@ -57,97 +66,170 @@ export async function getOutline(doc: PDFDoc): Promise<OutlineItem[]> {
     })
   }
 
-  const tree = raw?.length ? await walk(raw, '') : await outlineFromContentsPage(doc)
+  const usable = raw?.length && !looksLikeFileNames(raw.map((i) => i.title))
+  const tree = usable ? await walk(raw, '') : await outlineFromPageText(doc)
   assignEnds(tree, doc.numPages)
   return tree
 }
 
-// --- Contents-page fallback ----------------------------------------------------
+// --- Fallback when a manual has no usable bookmarks -----------------------------
 //
-// Some manuals (e.g. 2017) have no PDF bookmarks, only a printed "Contents" page.
-// Rebuild the outline from it: each entry is "<number> <title> ....... <page>",
-// nesting follows the section number ("10.2.1" sits under "10.2"), and the entry's
-// link annotation (when present) gives its real page.
+// Some manuals have no PDF bookmarks (2017) or only bookmarks named after the files
+// that were merged into the PDF (2016). Their structure is still printed in the
+// text: a "Contents" page or one contents page per chapter, with entries like
+// "3.12 GAME PIECES ........ 37". Nesting follows the section number ("10.2.1"
+// sits under "10.2"), and each entry's link annotation, when present, gives its
+// real page (printed numbers may restart in every chapter).
 
 interface TocEntry {
   number: string | null
   title: string
-  /** Page number printed in the contents. */
-  printed: number
-  /** Actual PDF page, from the entry's link; NaN until resolved. */
   page: number
 }
 
-const TOC_SCAN_PAGES = 15
 const TOC_LINE = /^(?:(\d+(?:\.\d+)*)\.?\s+)?(.*?\S)\s*\.{3,}[.\s]*(\d{1,4})$/
+// Section numbers have at most two digits per level, so "2016 FIRST ..." isn't one.
+const NUMBERED_HEADING = /^(\d{1,2}(?:\.\d{1,2})*)\.?\s+(\S.*)$/
 
-async function outlineFromContentsPage(doc: PDFDoc): Promise<OutlineItem[]> {
+/** True when bookmarks are just file names, e.g. "FRC-2016-game-manual-02". */
+const looksLikeFileNames = (titles: string[]) => titles.length > 0 && titles.every((t) => !/\s/.test(t.trim()))
+
+interface TextLine {
+  y: number
+  size: number
+  text: string
+}
+
+async function pageTextLines(doc: PDFDoc, pageNumber: number) {
+  const page = await doc.getPage(pageNumber)
+  const [content, annotations] = await Promise.all([page.getTextContent(), page.getAnnotations()])
+  // Group text into lines, skipping trademark symbols set as superscripts.
+  const groups: { y: number; size: number; parts: { x: number; width: number; str: string }[] }[] = []
+  for (const item of content.items) {
+    if (!('str' in item) || !item.str.trim() || /^[®™℠©\s]+$/.test(item.str)) continue
+    const y = item.transform[5]
+    const size = Math.hypot(item.transform[2], item.transform[3])
+    let line = groups.find((l) => Math.abs(l.y - y) < 3)
+    if (!line) groups.push((line = { y, size, parts: [] }))
+    line.size = Math.max(line.size, size)
+    line.parts.push({ x: item.transform[4], width: item.width, str: item.str })
+  }
+  const lines: TextLine[] = groups
+    .sort((a, b) => b.y - a.y)
+    .map((g) => {
+      let text = ''
+      let right = -Infinity
+      for (const part of g.parts.sort((a, b) => a.x - b.x)) {
+        // Small-caps titles are split into touching pieces ("Aren" + "A"): no space.
+        text += part.x - right > g.size * 0.15 && text ? ` ${part.str}` : part.str
+        right = part.x + part.width
+      }
+      return { y: g.y, size: g.size, text: text.replace(/[®™℠]/g, '').replace(/\s+/g, ' ').trim() }
+    })
+  return { lines, links: annotations.filter((a) => a.subtype === 'Link' && a.dest) }
+}
+
+/** Fixes small-caps words that come out as "ArenA" or "IntroductIon". */
+const cleanTitle = (title: string) =>
+  title.replace(/\b[A-Za-z]*[a-z][A-Z][A-Za-z]*\b/g, (w) => (/^[A-Z][a-z]+[A-Z][a-z]+$/.test(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase()))
+
+/** A page's title: its largest line that isn't just a number or a contents entry. */
+function pageTitle(lines: TextLine[]): string | null {
+  const candidates = lines.filter((l) => /[A-Za-z]{3}/.test(l.text) && !TOC_LINE.test(l.text) && !/©|rights reserved|\|\|/i.test(l.text))
+  const best = candidates.sort((a, b) => b.size - a.size)[0]
+  return best ? cleanTitle(best.text.replace(NUMBERED_HEADING, '$2')) : null
+}
+
+async function outlineFromPageText(doc: PDFDoc): Promise<OutlineItem[]> {
   const entries: TocEntry[] = []
-  const offsets: number[] = []
-  let inToc = false
+  const chapters = new Set<string>()
+  let firstTocPage = Infinity
 
-  for (let p = 1; p <= Math.min(doc.numPages, TOC_SCAN_PAGES); p++) {
-    const page = await doc.getPage(p)
-    const [content, annotations] = await Promise.all([page.getTextContent(), page.getAnnotations()])
-
-    // Group text into lines, skipping trademark symbols set as superscripts.
-    const lines: { y: number; parts: { x: number; str: string }[] }[] = []
-    for (const item of content.items) {
-      if (!('str' in item) || !item.str.trim() || /^[®™℠©\s]+$/.test(item.str)) continue
-      const y = item.transform[5]
-      let line = lines.find((l) => Math.abs(l.y - y) < 3)
-      if (!line) lines.push((line = { y, parts: [] }))
-      line.parts.push({ x: item.transform[4], str: item.str })
-    }
-    lines.sort((a, b) => b.y - a.y)
-    const texts = lines.map((l) => ({
-      y: l.y,
-      text: l.parts
-        .sort((a, b) => a.x - b.x)
-        .map((part) => part.str)
-        .join(' ')
-        .replace(/[®™℠]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim(),
-    }))
-
-    const isTocPage = inToc || texts.some((t) => /^(table of )?contents\b/i.test(t.text))
-    const pageEntries: { number: string | null; title: string; printed: number; y: number }[] = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const { lines, links } = await pageTextLines(doc, p)
+    const found: (TocEntry & { y: number; printed: number })[] = []
     let carry = ''
-    for (const { y, text } of texts) {
+    for (const { y, text } of lines) {
       const m = TOC_LINE.exec(carry ? `${carry} ${text}` : text)
       if (m) {
-        pageEntries.push({ number: m[1] ?? null, title: m[2].replace(/\s+([,.])/g, '$1').trim(), printed: Number(m[3]), y })
+        found.push({ number: m[1] ?? null, title: m[2].replace(/\s+([,.])/g, '$1').trim(), printed: Number(m[3]), page: NaN, y })
         carry = ''
       } else {
         // A long title can wrap onto the next line; only numbered lines start an entry.
         carry = /^\d+(\.\d+)*\.?\s+\S/.test(text) && !carry ? text : ''
       }
     }
-    if (!isTocPage || pageEntries.length < 3) {
-      if (inToc) break
-      continue
-    }
-    inToc = true
+    if (found.length < 3) continue
+    firstTocPage = Math.min(firstTocPage, p)
 
     // Prefer the entry's link target over its printed page number.
-    const links = annotations.filter((a) => a.subtype === 'Link' && a.dest)
-    for (const entry of pageEntries) {
+    const offsets: number[] = []
+    for (const entry of found) {
       const link = links.find((a) => a.rect[1] - 3 <= entry.y && entry.y <= a.rect[3] + 3)
       const target = link ? await destinationPage(doc, link.dest) : null
-      if (target != null) offsets.push(target - entry.printed)
-      entries.push({ number: entry.number, title: entry.title, printed: entry.printed, page: target ?? NaN })
+      if (target != null) {
+        entry.page = target
+        offsets.push(target - entry.printed)
+      }
+    }
+    const offset = offsets.length ? offsets.sort((a, b) => a - b)[Math.floor(offsets.length / 2)] : 0
+    for (const entry of found) if (Number.isNaN(entry.page)) entry.page = Math.min(doc.numPages, Math.max(1, entry.printed + offset))
+
+    // A chapter's own contents page lists only its subsections ("2.1", "2.2", ...);
+    // the chapter itself is titled on that page.
+    const chapter = found.find((e) => e.number)?.number?.split('.')[0]
+    if (chapter && !found.some((e) => e.number === chapter) && !chapters.has(chapter)) {
+      entries.push({ number: chapter, title: pageTitle(lines.filter((l) => l.y > found[0].y)) ?? `Section ${chapter}`, page: p })
+    }
+    for (const entry of found) {
+      if (entry.number && !entry.number.includes('.')) chapters.add(entry.number)
+      entries.push({ number: entry.number, title: entry.title, page: entry.page })
+    }
+    if (chapter) chapters.add(chapter)
+  }
+
+  // Pages before the first contents page (e.g. an Introduction chapter with no
+  // contents page of its own): use their large numbered headings.
+  const front: TocEntry[] = []
+  const firstPage = Math.min(firstTocPage, ...entries.map((e) => e.page))
+  for (let p = 1; p < Math.min(firstPage, doc.numPages + 1); p++) {
+    const { lines } = await pageTextLines(doc, p)
+    const sizes = lines.map((l) => l.size).sort((a, b) => a - b)
+    const body = sizes[Math.floor(sizes.length / 2)] ?? 0
+    for (const line of lines) {
+      const m = NUMBERED_HEADING.exec(line.text)
+      if (!m || line.size < body * 1.35 || TOC_LINE.test(line.text) || m[2].length > 80) continue
+      const chapter = m[1].split('.')[0]
+      if (m[1].includes('.') && !chapters.has(chapter)) {
+        front.push({ number: chapter, title: pageTitle(lines.filter((l) => l.y > line.y)) ?? `Section ${chapter}`, page: p })
+        chapters.add(chapter)
+      }
+      if (!m[1].includes('.')) chapters.add(chapter)
+      front.push({ number: m[1], title: cleanTitle(m[2]), page: p })
     }
   }
 
-  // Entries without a link use their printed page shifted by the usual offset.
-  const sorted = [...offsets].sort((a, b) => a - b)
-  const offset = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0
-  for (const entry of entries) {
-    if (Number.isNaN(entry.page)) entry.page = Math.min(doc.numPages, Math.max(1, entry.printed + offset))
-  }
+  return nestEntries([...front, ...entries], doc.numPages)
+}
 
-  // Nest entries by their section numbers.
+/**
+ * The section holding the game rules: "Game Rules" in most manuals; in older ones
+ * (e.g. 2016) a "Rules" subsection of the "Game" chapter, or that chapter itself.
+ */
+export function findRulesSection(outline: OutlineItem[]): OutlineItem | undefined {
+  const all: OutlineItem[] = []
+  const walk = (items: OutlineItem[]) => items.forEach((i) => (all.push(i), walk(i.children)))
+  walk(outline)
+  const game = outline.find((i) => /^\d+\s+Game$/i.test(i.title.trim()))
+  return (
+    all.find((i) => /Game Rules/i.test(i.title)) ??
+    game?.children.find((i) => /^[\d.]+\s+Rules$/i.test(i.title.trim())) ??
+    game
+  )
+}
+
+/** Nests contents entries by their section numbers. */
+function nestEntries(entries: TocEntry[], numPages: number): OutlineItem[] {
   const root: OutlineItem[] = []
   const stack: { depth: number; item: OutlineItem }[] = []
   entries.forEach((entry, i) => {
@@ -156,7 +238,7 @@ async function outlineFromContentsPage(doc: PDFDoc): Promise<OutlineItem[]> {
       id: `toc${i}`,
       title: entry.number ? `${entry.number} ${entry.title}` : entry.title,
       page: entry.page,
-      end: doc.numPages,
+      end: numPages,
       children: [],
     }
     while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop()
@@ -303,7 +385,7 @@ const GENERIC_TERMS = new Set(['ROBOT', 'ROBOTS', 'ALLIANCE', 'MATCH', 'FIELD', 
  * scoring elements it describes.
  */
 export function findGameElements(outline: OutlineItem[], index: PageText[]): GameElement[] {
-  const arena = outline.find((item) => /\bARENA\b/.test(item.title))
+  const arena = outline.find((item) => /\bARENA\b/i.test(item.title))
   if (!arena) return []
   const found = new Map<string, OutlineItem>()
   const add = (name: string, section: OutlineItem) => {

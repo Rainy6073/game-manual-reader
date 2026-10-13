@@ -30,6 +30,8 @@ interface Line {
   inBox: boolean
   /** Top of this page's footer (PDF y); content ends above it. */
   footerTop: number
+  /** Where images are drawn on this page. */
+  images: Rect[]
 }
 
 interface Rect {
@@ -43,10 +45,12 @@ interface Rect {
  * Finds coloured note boxes from the page's drawing operations: either a coloured
  * background fill, or (as in recent manuals) a thin coloured bar down the left edge.
  */
-function findBoxes(ops: { fnArray: number[]; argsArray: unknown[] }, pageWidth: number): { bars: Rect[]; fills: Rect[] } {
+function findBoxes(ops: { fnArray: number[]; argsArray: unknown[] }, pageWidth: number): { bars: Rect[]; fills: Rect[]; images: Rect[] } {
   const { OPS } = pdfjs
   const bars: Rect[] = []
   const fills: Rect[] = []
+  const images: Rect[] = []
+  const IMAGE_OPS = new Set([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject])
   type M = [number, number, number, number, number, number]
   const mul = (a: M, b: M): M => [
     a[0] * b[0] + a[2] * b[1],
@@ -67,6 +71,14 @@ function findBoxes(ops: { fnArray: number[]; argsArray: unknown[] }, pageWidth: 
     else if (fn === OPS.restore) ({ ctm, fill } = stack.pop() ?? { ctm, fill })
     else if (fn === OPS.transform) ctm = mul(ctm, args as M)
     else if (fn === OPS.setFillRGBColor && typeof args[0] === 'string') fill = args[0]
+    else if (IMAGE_OPS.has(fn)) {
+      // Images fill the unit square of the current transform.
+      const [a, b, c, d, e, f] = ctm
+      const xs = [e, a + e, c + e, a + c + e]
+      const ys = [f, b + f, d + f, b + d + f]
+      const r = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }
+      if (r.x1 - r.x0 > 20 && r.y1 - r.y0 > 20) images.push(r)
+    }
     else if (fn === OPS.constructPath && FILL_OPS.has(args[0] as number)) {
       if (/^#(?:([0-9a-f]{2})\1\1)$/i.test(fill)) return // black, white and greys
       const [minX, minY, maxX, maxY] = Array.from(args[2] as ArrayLike<number>)
@@ -77,7 +89,7 @@ function findBoxes(ops: { fnArray: number[]; argsArray: unknown[] }, pageWidth: 
       else if (r.x1 - r.x0 < pageWidth * 0.95 && r.y1 - r.y0 > 8) fills.push(r)
     }
   })
-  return { bars, fills }
+  return { bars, fills, images }
 }
 
 export type Block =
@@ -130,7 +142,7 @@ async function readLines(doc: PDFDoc, pageNumber: number): Promise<Line[]> {
   const ops = await page.getOperatorList()
   const content = await page.getTextContent()
   const pageHeight = page.view[3]
-  const { bars, fills } = findBoxes(ops, page.view[2])
+  const { bars, fills, images } = findBoxes(ops, page.view[2])
   const inBox = (x: number, y: number, size: number) =>
     bars.some((b) => b.x1 <= x + 1 && x - b.x1 < 24 && y + size >= b.y0 - 3 && y <= b.y1 + 3) ||
     fills.some((f) => x >= f.x0 && x <= f.x1 && y >= f.y0 && y <= f.y1)
@@ -183,7 +195,7 @@ async function readLines(doc: PDFDoc, pageNumber: number): Promise<Line[]> {
       line.items.push(it)
       line.size = Math.max(line.size, it.size)
     } else {
-      lines.push({ page: pageNumber, x: 0, y: it.y, size: it.size, items: [it], text: '', inBox: false, footerTop })
+      lines.push({ page: pageNumber, x: 0, y: it.y, size: it.size, items: [it], text: '', inBox: false, footerTop, images })
     }
   }
 
@@ -218,7 +230,9 @@ const allBold = (l: Line) => l.items.every((i) => i.bold || !i.text.trim())
 // older manuals) or, for minor subsections, in bold at body size.
 const isHeading = (l: Line) =>
   (l.size >= 12 && /^\d+(\.\d+)*\s+\S/.test(l.text)) || (allBold(l) && /^\d+\.\d+(\.\d+)*\s+\S/.test(l.text) && l.x < 100)
-const isCaption = (l: Line) => l.size < 10 && /^(Figure|Table)\s+\d/.test(l.text)
+// Captions are small type (recent manuals) or a short all-italic line (2016).
+const isCaption = (l: Line) =>
+  /^(Figure|Table)\s+\d/.test(l.text) && (l.size < 10 || (l.text.length < 150 && l.items.every((i) => i.italic || !i.text.trim())))
 const LIST_MARKER = /^(\(?[A-Za-z]\)|[A-Za-z]\.|\d{1,2}[.)]|[ivx]{1,4}\.|[•▪◦●○■□➢\-–−o])$/
 
 function toRuns(items: Item[]): Run[] {
@@ -284,7 +298,13 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
 
     if (isCaption(line)) {
       flush()
-      // Figures and tables sit below their caption.
+      const image = imageNextTo(line)
+      if (image) {
+        blocks.push({ kind: 'figure', caption: line.text, page: line.page, top: image.y1 + 2, bottom: image.y0 - 2 })
+        if (image.y1 < line.y) skip = { page: line.page, bottom: image.y0 }
+        continue
+      }
+      // No image (e.g. a table): it sits below its caption, down to where text resumes.
       const below = allLines.find((l) => l.page === line.page && l.y < line.y - 1 && resumesText(l))
       const bottom = below ? below.y + below.size + 2 : line.footerTop
       blocks.push({ kind: 'figure', caption: line.text, page: line.page, top: line.y - 2, bottom })
@@ -338,6 +358,37 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
   }
   flush()
   return blocks
+}
+
+/**
+ * The image (or row of images) a caption belongs to: directly below it in recent
+ * manuals, directly above it in some older ones (e.g. 2016).
+ */
+function imageNextTo(caption: Line): Rect | null {
+  const GAP = 30
+  const captionTop = caption.y + caption.size
+  let best: { rect: Rect; gap: number } | null = null
+  for (const rect of caption.images) {
+    const gapBelow = caption.y - rect.y1
+    const gapAbove = rect.y0 - captionTop
+    const gap = gapBelow >= -4 ? gapBelow : gapAbove >= -4 ? gapAbove : Infinity
+    if (gap < GAP && (!best || gap < best.gap)) best = { rect, gap }
+  }
+  if (!best) return null
+  // Include images side by side with it (multi-part figures).
+  const band = { ...best.rect }
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const r of caption.images) {
+      const overlaps = r.y0 < band.y1 - 2 && r.y1 > band.y0 + 2
+      if (overlaps && (r.y0 < band.y0 || r.y1 > band.y1)) {
+        band.y0 = Math.min(band.y0, r.y0)
+        band.y1 = Math.max(band.y1, r.y1)
+        grew = true
+      }
+    }
+  }
+  return band
 }
 
 // --- Public API -----------------------------------------------------------------

@@ -4,6 +4,7 @@ import {
   filterOutline,
   findElement,
   findGameElements,
+  findRulesSection,
   getOutline,
   loadPdf,
   outlinePathAt,
@@ -223,7 +224,7 @@ export default function App() {
     if (!focused || !element || !loaded) return
     if (focusData?.doc === loaded.doc && focusData.name === element.name) return
     let cancelled = false
-    const rulesSection = loaded.outline.find((i) => /Game Rules/i.test(i.title))
+    const rulesSection = findRulesSection(loaded.outline)
     Promise.all([extractSection(loaded.doc, element.section), rulesSection ? extractRules(loaded.doc, rulesSection) : []]).then(
       ([description, rules]) => {
         if (cancelled) return
