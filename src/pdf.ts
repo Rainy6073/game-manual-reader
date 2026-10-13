@@ -24,7 +24,6 @@ export function loadPdf(source: string | ArrayBuffer): Promise<PDFDoc> {
 /** Resolves the PDF's bookmarks into a tree with 1-based page numbers. */
 export async function getOutline(doc: PDFDoc): Promise<OutlineItem[]> {
   const raw = await doc.getOutline()
-  if (!raw) return []
 
   const resolve = async (dest: unknown): Promise<number | null> => {
     try {
@@ -38,7 +37,7 @@ export async function getOutline(doc: PDFDoc): Promise<OutlineItem[]> {
     }
   }
 
-  const walk = async (items: typeof raw, prefix: string): Promise<OutlineItem[]> =>
+  const walk = async (items: NonNullable<typeof raw>, prefix: string): Promise<OutlineItem[]> =>
     Promise.all(
       items.map(async (item, i) => ({
         id: `${prefix}${i}`,
@@ -58,9 +57,124 @@ export async function getOutline(doc: PDFDoc): Promise<OutlineItem[]> {
     })
   }
 
-  const tree = await walk(raw, '')
+  const tree = raw?.length ? await walk(raw, '') : await outlineFromContentsPage(doc)
   assignEnds(tree, doc.numPages)
   return tree
+}
+
+// --- Contents-page fallback ----------------------------------------------------
+//
+// Some manuals (e.g. 2017) have no PDF bookmarks, only a printed "Contents" page.
+// Rebuild the outline from it: each entry is "<number> <title> ....... <page>",
+// nesting follows the section number ("10.2.1" sits under "10.2"), and the entry's
+// link annotation (when present) gives its real page.
+
+interface TocEntry {
+  number: string | null
+  title: string
+  /** Page number printed in the contents. */
+  printed: number
+  /** Actual PDF page, from the entry's link; NaN until resolved. */
+  page: number
+}
+
+const TOC_SCAN_PAGES = 15
+const TOC_LINE = /^(?:(\d+(?:\.\d+)*)\.?\s+)?(.*?\S)\s*\.{3,}[.\s]*(\d{1,4})$/
+
+async function outlineFromContentsPage(doc: PDFDoc): Promise<OutlineItem[]> {
+  const entries: TocEntry[] = []
+  const offsets: number[] = []
+  let inToc = false
+
+  for (let p = 1; p <= Math.min(doc.numPages, TOC_SCAN_PAGES); p++) {
+    const page = await doc.getPage(p)
+    const [content, annotations] = await Promise.all([page.getTextContent(), page.getAnnotations()])
+
+    // Group text into lines, skipping trademark symbols set as superscripts.
+    const lines: { y: number; parts: { x: number; str: string }[] }[] = []
+    for (const item of content.items) {
+      if (!('str' in item) || !item.str.trim() || /^[®™℠©\s]+$/.test(item.str)) continue
+      const y = item.transform[5]
+      let line = lines.find((l) => Math.abs(l.y - y) < 3)
+      if (!line) lines.push((line = { y, parts: [] }))
+      line.parts.push({ x: item.transform[4], str: item.str })
+    }
+    lines.sort((a, b) => b.y - a.y)
+    const texts = lines.map((l) => ({
+      y: l.y,
+      text: l.parts
+        .sort((a, b) => a.x - b.x)
+        .map((part) => part.str)
+        .join(' ')
+        .replace(/[®™℠]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    }))
+
+    const isTocPage = inToc || texts.some((t) => /^(table of )?contents\b/i.test(t.text))
+    const pageEntries: { number: string | null; title: string; printed: number; y: number }[] = []
+    let carry = ''
+    for (const { y, text } of texts) {
+      const m = TOC_LINE.exec(carry ? `${carry} ${text}` : text)
+      if (m) {
+        pageEntries.push({ number: m[1] ?? null, title: m[2].replace(/\s+([,.])/g, '$1').trim(), printed: Number(m[3]), y })
+        carry = ''
+      } else {
+        // A long title can wrap onto the next line; only numbered lines start an entry.
+        carry = /^\d+(\.\d+)*\.?\s+\S/.test(text) && !carry ? text : ''
+      }
+    }
+    if (!isTocPage || pageEntries.length < 3) {
+      if (inToc) break
+      continue
+    }
+    inToc = true
+
+    // Prefer the entry's link target over its printed page number.
+    const links = annotations.filter((a) => a.subtype === 'Link' && a.dest)
+    for (const entry of pageEntries) {
+      const link = links.find((a) => a.rect[1] - 3 <= entry.y && entry.y <= a.rect[3] + 3)
+      const target = link ? await destinationPage(doc, link.dest) : null
+      if (target != null) offsets.push(target - entry.printed)
+      entries.push({ number: entry.number, title: entry.title, printed: entry.printed, page: target ?? NaN })
+    }
+  }
+
+  // Entries without a link use their printed page shifted by the usual offset.
+  const sorted = [...offsets].sort((a, b) => a - b)
+  const offset = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0
+  for (const entry of entries) {
+    if (Number.isNaN(entry.page)) entry.page = Math.min(doc.numPages, Math.max(1, entry.printed + offset))
+  }
+
+  // Nest entries by their section numbers.
+  const root: OutlineItem[] = []
+  const stack: { depth: number; item: OutlineItem }[] = []
+  entries.forEach((entry, i) => {
+    const depth = entry.number ? entry.number.split('.').length : 1
+    const item: OutlineItem = {
+      id: `toc${i}`,
+      title: entry.number ? `${entry.number} ${entry.title}` : entry.title,
+      page: entry.page,
+      end: doc.numPages,
+      children: [],
+    }
+    while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop()
+    ;(stack.length ? stack[stack.length - 1].item.children : root).push(item)
+    stack.push({ depth, item })
+  })
+  return root
+}
+
+async function destinationPage(doc: PDFDoc, dest: unknown): Promise<number | null> {
+  try {
+    const explicit = typeof dest === 'string' ? await doc.getDestination(dest) : dest
+    if (!Array.isArray(explicit) || explicit.length === 0) return null
+    const ref = explicit[0]
+    return (typeof ref === 'number' ? ref : await doc.getPageIndex(ref)) + 1
+  } catch {
+    return null
+  }
 }
 
 /** The path of outline entries (outermost first) whose page range contains `page`. */

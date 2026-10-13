@@ -28,6 +28,8 @@ interface Line {
   text: string
   /** Sits inside one of the manual's coloured note boxes. */
   inBox: boolean
+  /** Top of this page's footer (PDF y); content ends above it. */
+  footerTop: number
 }
 
 interface Rect {
@@ -105,7 +107,7 @@ export interface Rule {
   blocks: Block[]
 }
 
-/** Lines below this are page footers; above PAGE_TOP_MARGIN from the top are headers. */
+/** Minimum footer height; text this far from the top of the page is a header. */
 const FOOTER_Y = 45
 const HEADER_GAP = 30
 
@@ -160,17 +162,28 @@ async function readLines(doc: PDFDoc, pageNumber: number): Promise<Line[]> {
       width: it.width,
       ...styleOf(it.fontName),
     }))
-    .filter((it) => it.y > FOOTER_Y && it.y < pageHeight - HEADER_GAP)
+
+  // The footer holds the "N of M" page number and section name in small type;
+  // its height varies between manuals (2017's sits much higher than 2026's).
+  const footerTop = Math.max(
+    FOOTER_Y,
+    ...raw
+      .filter((it) => it.y < 110 && (/\d+\s+of\s+\d+$/.test(it.text.trim()) || (it.size <= 9 && /^Section\b/.test(it.text.trim()))))
+      .map((it) => it.y + it.size + 4),
+  )
+
+  const items = raw
+    .filter((it) => it.y > footerTop && it.y < pageHeight - HEADER_GAP)
     .sort((a, b) => b.y - a.y || a.x - b.x)
 
   const lines: Line[] = []
-  for (const it of raw) {
+  for (const it of items) {
     const line = lines.find((l) => Math.abs(l.y - it.y) < Math.max(2, it.size * 0.3))
     if (line) {
       line.items.push(it)
       line.size = Math.max(line.size, it.size)
     } else {
-      lines.push({ page: pageNumber, x: 0, y: it.y, size: it.size, items: [it], text: '', inBox: false })
+      lines.push({ page: pageNumber, x: 0, y: it.y, size: it.size, items: [it], text: '', inBox: false, footerTop })
     }
   }
 
@@ -201,8 +214,10 @@ async function linesFor(doc: PDFDoc, from: number, to: number): Promise<Line[]> 
 // --- Block building ----------------------------------------------------------
 
 const allBold = (l: Line) => l.items.every((i) => i.bold || !i.text.trim())
+// Numbered section headings are either set larger than body text (any font, as in
+// older manuals) or, for minor subsections, in bold at body size.
 const isHeading = (l: Line) =>
-  allBold(l) && (l.size >= 12 ? /^\d+(\.\d+)*\s+\S/.test(l.text) : /^\d+\.\d+(\.\d+)*\s+\S/.test(l.text) && l.x < 60)
+  (l.size >= 12 && /^\d+(\.\d+)*\s+\S/.test(l.text)) || (allBold(l) && /^\d+\.\d+(\.\d+)*\s+\S/.test(l.text) && l.x < 100)
 const isCaption = (l: Line) => l.size < 10 && /^(Figure|Table)\s+\d/.test(l.text)
 const LIST_MARKER = /^(\(?[A-Za-z]\)|[A-Za-z]\.|\d{1,2}[.)]|[ivx]{1,4}\.|[•▪◦●○■□➢\-–−o])$/
 
@@ -245,7 +260,8 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
       block.runs = block.runs.map((r) => ({ ...r, text: r.text.replace(/\s+/g, ' ') }))
       block.runs[0].text = block.runs[0].text.trimStart()
       block.runs[block.runs.length - 1].text = block.runs[block.runs.length - 1].text.trimEnd()
-      if (block.runs.some((r) => r.text)) blocks.push(block)
+      block.runs = block.runs.filter((r) => r.text)
+      if (block.runs.length) blocks.push(block)
     }
     para = null
   }
@@ -270,7 +286,7 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
       flush()
       // Figures and tables sit below their caption.
       const below = allLines.find((l) => l.page === line.page && l.y < line.y - 1 && resumesText(l))
-      const bottom = below ? below.y + below.size + 2 : FOOTER_Y
+      const bottom = below ? below.y + below.size + 2 : line.footerTop
       blocks.push({ kind: 'figure', caption: line.text, page: line.page, top: line.y - 2, bottom })
       skip = { page: line.page, bottom }
       continue
@@ -285,10 +301,10 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
     const box = line.inBox
     const first = line.items.find((i) => i.text.trim())!
     const markerMatch = LIST_MARKER.test(first.text.trim()) ? first : null
-    const violation = first.italic && /^Violation\b/.test(line.text)
+    const violation = /^Violation:/.test(line.text)
 
-    // A violation line may wrap onto a second italic line.
-    const violationWrap = !!para?.violation && first.italic
+    // A violation line may wrap onto a second line.
+    const violationWrap = !!para?.violation && (first.italic || Math.abs(line.x - para.contX) < 2)
     let startNew = !para || para.box !== box || !!markerMatch || violation || (para.violation && !violationWrap)
     if (para && !startNew) {
       const prev: Line = para.last
@@ -326,7 +342,8 @@ function buildBlocks(lines: Line[], bodyX: number, allLines: Line[]): Block[] {
 
 // --- Public API -----------------------------------------------------------------
 
-const RULE_ID = /^[A-Z]{1,2}\d{3}[a-z]?$/
+// e.g. "G104" (recent manuals), or "G14." and "G01-1." (older ones).
+const RULE_ID = /^[A-Z]{1,2}\d{1,3}(?:-\d+)?[a-z]?\.?$/
 
 const ruleCache = new WeakMap<PDFDoc, Map<string, Promise<Rule[]>>>()
 
@@ -361,12 +378,12 @@ async function parseRules(doc: PDFDoc, section: OutlineItem): Promise<Rule[]> {
       heading = line.text
       continue
     }
-    if (first.bold && RULE_ID.test(first.text.trim()) && line.x < 60) {
+    if (first.bold && RULE_ID.test(first.text.trim()) && line.x < 100) {
       finish()
       const rest = line.items.slice(line.items.indexOf(first) + 1)
       const bodyX = rest.find((i) => i.text.trim())?.x ?? line.x + 36
       current = {
-        rule: { id: first.text.trim(), section: heading, page: line.page, y: line.y, blocks: [] },
+        rule: { id: first.text.trim().replace(/\.$/, ''), section: heading, page: line.page, y: line.y, blocks: [] },
         lines: [{ ...line, items: rest, x: bodyX, text: rest.map((i) => i.text).join('').trim() }],
         bodyX,
       }
