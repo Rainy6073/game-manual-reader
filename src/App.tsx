@@ -60,7 +60,11 @@ export default function App() {
   const [focused, setFocused] = useState(false)
   const [focusData, setFocusData] = useState<{ doc: PDFDoc; name: string; data: FocusData } | null>(null)
   const [focusActive, setFocusActive] = useState(DESCRIPTION_ID)
-  const pendingPageRef = useRef<number | null>(null)
+  // A spot in the PDF to scroll to once the Pages view is shown (y in PDF space).
+  const pendingPageRef = useRef<{ page: number; y?: number } | null>(null)
+  const [flash, setFlash] = useState<{ page: number; y: number; token: number } | null>(null)
+  // Pages outside the element filter that were opened from the Focused View.
+  const [extraPages, setExtraPages] = useState<number[]>([])
 
   const open = useCallback(async (source: string | ArrayBuffer, name: string) => {
     setLoading(true)
@@ -82,6 +86,7 @@ export default function App() {
       })
       setElement(null)
       setFocused(false)
+      setExtraPages([])
       setCurrentPage(1)
       setPageInput('1')
       viewerRef.current?.scrollTo({ top: 0 })
@@ -163,9 +168,9 @@ export default function App() {
   /** Pages currently shown: every page, or only those mentioning the selected game element. */
   const visiblePages = useMemo(() => {
     if (!loaded) return []
-    if (element) return [...new Set(elementMatches.map((m) => m.page))].sort((a, b) => a - b)
+    if (element) return [...new Set([...elementMatches.map((m) => m.page), ...extraPages])].sort((a, b) => a - b)
     return loaded.sizes.map((_, i) => i + 1)
-  }, [loaded, element, elementMatches])
+  }, [loaded, element, elementMatches, extraPages])
   const visibleSet = useMemo(() => new Set(visiblePages), [visiblePages])
 
   const shownOutline = useMemo(
@@ -184,9 +189,16 @@ export default function App() {
     pendingPageRef.current = null
     const viewer = viewerRef.current
     if (!viewer) return
-    const target = pending != null ? visiblePages.find((p) => p >= pending) ?? visiblePages[visiblePages.length - 1] : null
+    // Pages mounted fresh shouldn't jump to an old search match.
+    setScrollRequest(0)
+    const target = pending != null ? visiblePages.find((p) => p >= pending.page) ?? visiblePages[visiblePages.length - 1] : null
     const el = target != null && !focused ? viewer.querySelector<HTMLElement>(`[data-page="${target}"]`) : null
-    viewer.scrollTo({ top: el ? el.offsetTop - 16 : 0 })
+    let top = el ? el.offsetTop - 16 : 0
+    if (el && loaded && pending?.y != null && target === pending.page) {
+      // Put the spot a little below the top of the viewer.
+      top = el.offsetTop + (loaded.sizes[target - 1].height - pending.y) * scaleRef.current - 80
+    }
+    viewer.scrollTo({ top })
     const page = target ?? visiblePages[0]
     if (page != null) {
       setCurrentPage(page)
@@ -199,6 +211,7 @@ export default function App() {
 
   const selectElement = useCallback((el: GameElement | null) => {
     setElement(el)
+    setExtraPages([])
     if (!el) setFocused(false)
   }, [])
 
@@ -253,10 +266,16 @@ export default function App() {
     return group ? [group.id, ...(group.id === focusActive ? [] : [focusActive])] : []
   }, [focusOutline, focusActive])
 
-  const openPageFromFocus = useCallback((page: number) => {
-    pendingPageRef.current = page
-    setFocused(false)
-  }, [])
+  /** Leaves the Focused View for the PDF, at `page` (and position `y`, marked briefly). */
+  const openPageFromFocus = useCallback(
+    (page: number, y?: number) => {
+      if (element && !visibleSet.has(page)) setExtraPages((pages) => [...pages, page])
+      pendingPageRef.current = { page, y }
+      setFlash(y != null ? { page, y, token: Date.now() } : null)
+      setFocused(false)
+    },
+    [element, visibleSet],
+  )
 
   const scrollToPage = useCallback((page: number) => {
     const el = viewerRef.current?.querySelector<HTMLElement>(`[data-page="${page}"]`)
@@ -429,7 +448,75 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matches])
 
+  // Search inside the Focused View: matches are DOM ranges, painted with the CSS
+  // Custom Highlight API so React's markup is left untouched.
+  const focusRangesRef = useRef<Range[]>([])
+  const [focusMatch, setFocusMatch] = useState({ index: 0, count: 0, request: 0 })
+
+  useEffect(() => {
+    const root = viewerRef.current?.querySelector('.focused')
+    focusRangesRef.current = []
+    const needle = query.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!focused || !searchOpen || !root || !currentFocus || !needle) {
+      setFocusMatch({ index: 0, count: 0, request: 0 })
+      return
+    }
+    const nodes: { node: Text; start: number }[] = []
+    let text = ''
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      nodes.push({ node: n as Text, start: text.length })
+      text += n.nodeValue ?? ''
+    }
+    const hay = text.toLowerCase().replace(/\s/g, ' ')
+    const locate = (offset: number) => {
+      let i = nodes.length - 1
+      while (i > 0 && nodes[i].start > offset) i--
+      return { node: nodes[i].node, offset: offset - nodes[i].start }
+    }
+    const ranges: Range[] = []
+    for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) {
+      const range = document.createRange()
+      const start = locate(at)
+      const end = locate(at + needle.length)
+      range.setStart(start.node, start.offset)
+      range.setEnd(end.node, end.offset)
+      ranges.push(range)
+    }
+    focusRangesRef.current = ranges
+    // Start from the first match at or below the top of the view.
+    const viewerTop = viewerRef.current!.getBoundingClientRect().top
+    const first = ranges.findIndex((r) => r.getBoundingClientRect().top >= viewerTop)
+    setFocusMatch((m) => ({ index: Math.max(0, first), count: ranges.length, request: m.request + 1 }))
+  }, [focused, searchOpen, query, currentFocus])
+
+  useEffect(() => {
+    const highlights = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights
+    const ranges = focusRangesRef.current
+    const current = ranges[focusMatch.index]
+    if (highlights && typeof Highlight !== 'undefined') {
+      highlights.set('focus-search', new Highlight(...ranges.filter((r) => r !== current)))
+      highlights.set('focus-search-current', new Highlight(...(current ? [current] : [])))
+    }
+    const viewer = viewerRef.current
+    if (current && viewer && focusMatch.request > 0) {
+      const rect = current.getBoundingClientRect()
+      const box = viewer.getBoundingClientRect()
+      if (rect.top < box.top + 60 || rect.bottom > box.bottom - 40) {
+        viewer.scrollBy({ top: rect.top - box.top - viewer.clientHeight / 3 })
+      }
+    }
+    return () => {
+      highlights?.delete('focus-search')
+      highlights?.delete('focus-search-current')
+    }
+  }, [focusMatch])
+
   const step = (dir: 1 | -1) => {
+    if (focused) {
+      setFocusMatch((m) => (m.count ? { ...m, index: (m.index + dir + m.count) % m.count, request: m.request + 1 } : m))
+      return
+    }
     if (matches.length === 0) return
     goToMatch((matchIndex + dir + matches.length) % matches.length)
   }
@@ -447,14 +534,15 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
-      // The Focused View is ordinary text, so the browser's own find and zoom apply.
-      if (focused) return
       if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         openSearch()
       } else if (mod && e.key.toLowerCase() === 'g' && searchOpen) {
         e.preventDefault()
         step(e.shiftKey ? -1 : 1)
+      } else if (focused) {
+        // The Focused View is ordinary text, so the browser's own zoom applies.
+        if (e.key === 'Escape' && searchOpen) setSearchOpen(false)
       } else if (mod && (e.key === '=' || e.key === '+')) {
         e.preventDefault()
         zoomTo(scaleRef.current * 1.15)
@@ -515,35 +603,39 @@ export default function App() {
           {loaded && <span className="doc-name">{loaded.name}</span>}
         </div>
 
-        {loaded && !focused && (
+        {loaded && (
           <div className="controls">
-            <form
-              className="page-nav"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const n = Math.min(total, Math.max(1, parseInt(pageInput, 10) || 1))
-                goToPage(n)
-              }}
-            >
-              <button type="button" className="icon" disabled={prevPage == null} onClick={() => prevPage != null && scrollToPage(prevPage)} title="Previous page">
-                ‹
-              </button>
-              <input
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value)}
-                inputMode="numeric"
-                aria-label="Page number"
-              />
-              <span className="muted">/ {total}</span>
-              <button type="button" className="icon" disabled={nextPage == null} onClick={() => nextPage != null && scrollToPage(nextPage)} title="Next page">
-                ›
-              </button>
-            </form>
-            <div className="zoom">
-              <button className="icon" onClick={() => zoomTo(scale / 1.15)} title="Zoom out">−</button>
-              <span className="muted zoom-label">{Math.round(scale * 100)}%</span>
-              <button className="icon" onClick={() => zoomTo(scale * 1.15)} title="Zoom in">+</button>
-            </div>
+            {!focused && (
+              <form
+                className="page-nav"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const n = Math.min(total, Math.max(1, parseInt(pageInput, 10) || 1))
+                  goToPage(n)
+                }}
+              >
+                <button type="button" className="icon" disabled={prevPage == null} onClick={() => prevPage != null && scrollToPage(prevPage)} title="Previous page">
+                  ‹
+                </button>
+                <input
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  inputMode="numeric"
+                  aria-label="Page number"
+                />
+                <span className="muted">/ {total}</span>
+                <button type="button" className="icon" disabled={nextPage == null} onClick={() => nextPage != null && scrollToPage(nextPage)} title="Next page">
+                  ›
+                </button>
+              </form>
+            )}
+            {!focused && (
+              <div className="zoom">
+                <button className="icon" onClick={() => zoomTo(scale / 1.15)} title="Zoom out">−</button>
+                <span className="muted zoom-label">{Math.round(scale * 100)}%</span>
+                <button className="icon" onClick={() => zoomTo(scale * 1.15)} title="Zoom in">+</button>
+              </div>
+            )}
             <button className="icon" onClick={openSearch} title="Search (⌘F / Ctrl+F)" aria-label="Search">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                 <circle cx="11" cy="11" r="7" />
@@ -587,14 +679,14 @@ export default function App() {
           />
         )}
 
-        {searchOpen && loaded && !focused && (
+        {searchOpen && loaded && (
           <SearchBar
             query={query}
             onQueryChange={setQuery}
             focusRequest={searchFocus}
-            ready={indexReady}
-            current={matches.length ? matchIndex + 1 : 0}
-            total={matches.length}
+            ready={focused ? !!currentFocus : indexReady}
+            current={focused ? (focusMatch.count ? focusMatch.index + 1 : 0) : matches.length ? matchIndex + 1 : 0}
+            total={focused ? focusMatch.count : matches.length}
             onNext={() => step(1)}
             onPrev={() => step(-1)}
             onClose={() => setSearchOpen(false)}
@@ -650,6 +742,7 @@ export default function App() {
                 baseSize={loaded.sizes[page - 1]}
                 highlights={highlightsByPage.get(page)}
                 scrollRequest={matches[matchIndex]?.page === page ? scrollRequest : undefined}
+                flash={flash?.page === page ? flash : undefined}
               />
             ))}
         </main>

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { DESCRIPTION_ID, ruleAnchor, sectionAnchor } from './anchors'
 import type { GameElement, PDFDoc } from './pdf'
 import { blocksText, type Block, type Rule, type Run } from './structure'
@@ -14,7 +14,8 @@ interface Props {
   /** Terms that make a rule relevant (and are highlighted). */
   terms: GameElement[]
   data: FocusData | null
-  onOpenPage: (page: number) => void
+  /** Shows a spot in the PDF; `y` is a PDF-space position on the page. */
+  onOpenPage: (page: number, y?: number) => void
   /** Reports the id of the description or rule currently at the top of the view. */
   onActiveChange: (id: string) => void
 }
@@ -22,7 +23,6 @@ interface Props {
 
 export default function FocusedView({ doc, element, terms, data, onOpenPage, onActiveChange }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const termPattern = useMemo(() => new RegExp(terms.map((t) => t.pattern.source).join('|'), 'g'), [terms])
 
   // Track which section is at the top of the view, for the Contents highlight.
   useEffect(() => {
@@ -71,7 +71,7 @@ export default function FocusedView({ doc, element, terms, data, onOpenPage, onA
       <header className="focused-header">
         <p className="eyebrow">Focused view</p>
         <h1>
-          <mark className="term">{element.name}</mark>
+          {element.name}
         </h1>
         {terms.length > 1 && (
           <p className="muted">
@@ -94,7 +94,7 @@ export default function FocusedView({ doc, element, terms, data, onOpenPage, onA
           </span>
         </div>
         {data.description.length ? (
-          <Blocks blocks={data.description} doc={doc} pattern={termPattern} />
+          <Blocks blocks={data.description} doc={doc} />
         ) : (
           <p className="muted">No description text found for this element.</p>
         )}
@@ -114,7 +114,19 @@ export default function FocusedView({ doc, element, terms, data, onOpenPage, onA
               {section.title}
             </h3>
             {section.rules.map((rule) => (
-              <article className="rule" key={rule.id} id={ruleAnchor(rule.id)} data-anchor={ruleAnchor(rule.id)}>
+              <article
+                className="rule"
+                key={rule.id}
+                id={ruleAnchor(rule.id)}
+                data-anchor={ruleAnchor(rule.id)}
+                title="Show this rule in the PDF"
+                onClick={(e) => {
+                  // Let people select text without being sent to the PDF.
+                  if (window.getSelection()?.toString()) return
+                  if ((e.target as HTMLElement).closest('button')) return
+                  onOpenPage(rule.page, rule.y)
+                }}
+              >
                 <div className="rule-head">
                   <span className="rule-id">{rule.id}</span>
                   {terms.length > 1 && (
@@ -126,9 +138,9 @@ export default function FocusedView({ doc, element, terms, data, onOpenPage, onA
                       ))}
                     </span>
                   )}
-                  <PageLink page={rule.page} onOpenPage={onOpenPage} />
+                  <PageLink page={rule.page} onOpenPage={() => onOpenPage(rule.page, rule.y)} />
                 </div>
-                <Blocks blocks={rule.blocks} doc={doc} pattern={termPattern} />
+                <Blocks blocks={rule.blocks} doc={doc} />
               </article>
             ))}
           </Fragment>
@@ -146,7 +158,7 @@ function PageLink({ page, onOpenPage }: { page: number; onOpenPage: (page: numbe
   )
 }
 
-function Blocks({ blocks, doc, pattern }: { blocks: Block[]; doc: PDFDoc; pattern: RegExp }) {
+function Blocks({ blocks, doc }: { blocks: Block[]; doc: PDFDoc }) {
   // Consecutive note-box paragraphs share one box, like in the manual.
   const groups: { box: boolean; blocks: Block[] }[] = []
   for (const block of blocks) {
@@ -159,7 +171,7 @@ function Blocks({ blocks, doc, pattern }: { blocks: Block[]; doc: PDFDoc; patter
   return (
     <>
       {groups.map((group, g) => {
-        const content = group.blocks.map((block, i) => <BlockView key={i} block={block} doc={doc} pattern={pattern} />)
+        const content = group.blocks.map((block, i) => <BlockView key={i} block={block} doc={doc} />)
         return group.box ? (
           <div className="note-box" key={g}>
             {content}
@@ -172,11 +184,11 @@ function Blocks({ blocks, doc, pattern }: { blocks: Block[]; doc: PDFDoc; patter
   )
 }
 
-function BlockView({ block, doc, pattern }: { block: Block; doc: PDFDoc; pattern: RegExp }) {
+function BlockView({ block, doc }: { block: Block; doc: PDFDoc }) {
   if (block.kind === 'heading') return <h4 className="block-heading">{block.text}</h4>
   if (block.kind === 'figure') return <FigureCrop doc={doc} block={block} />
 
-  const text = <Runs runs={block.runs} pattern={pattern} />
+  const text = <Runs runs={block.runs} />
   if (block.marker) {
     return (
       <div className="list-item" style={{ marginLeft: `${block.depth * 1.5}em` }}>
@@ -188,34 +200,17 @@ function BlockView({ block, doc, pattern }: { block: Block; doc: PDFDoc; pattern
   return <p className={block.violation ? 'violation' : undefined}>{text}</p>
 }
 
-function Runs({ runs, pattern }: { runs: Run[]; pattern: RegExp }) {
+function Runs({ runs }: { runs: Run[] }) {
   return (
     <>
       {runs.map((run, i) => {
-        let content: ReactNode = highlight(run.text, pattern)
+        let content: ReactNode = run.text
         if (run.italic) content = <em>{content}</em>
         if (run.bold) content = <strong>{content}</strong>
         return <Fragment key={i}>{content}</Fragment>
       })}
     </>
   )
-}
-
-function highlight(text: string, pattern: RegExp): ReactNode {
-  const parts: ReactNode[] = []
-  let last = 0
-  for (const m of text.matchAll(pattern)) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    parts.push(
-      <mark className="term" key={m.index}>
-        {m[0]}
-      </mark>,
-    )
-    last = m.index + m[0].length
-  }
-  if (last === 0) return text
-  parts.push(text.slice(last))
-  return parts
 }
 
 // --- Figures -------------------------------------------------------------------

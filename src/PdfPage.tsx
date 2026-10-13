@@ -10,11 +10,13 @@ interface Props {
   highlights?: HighlightSegment[]
   /** Bumped by the parent to ask this page to scroll its selected match into view. */
   scrollRequest?: number
+  /** Briefly marks a spot on the page (PDF-space y); a new token replays it. */
+  flash?: { y: number; token: number }
 }
 
 const EMPTY: HighlightSegment[] = []
 
-export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights = EMPTY, scrollRequest = 0 }: Props) {
+export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights = EMPTY, scrollRequest = 0, flash }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
@@ -169,6 +171,14 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
           <div ref={canvasHostRef} className="canvas-host" />
           <div ref={textRef} className="text-host" />
         </>
+      )}
+      {flash && (
+        <div
+          key={flash.token}
+          className="rule-flash"
+          style={{ top: (baseSize.height - flash.y - 16) * scale, height: 24 * scale }}
+          aria-hidden
+        />
       )}
     </div>
   )

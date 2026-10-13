@@ -278,6 +278,34 @@ button.icon {
   outline: 2px solid rgb(70 160 0);
 }
 
+.rule-flash {
+  position: absolute;
+  left: 3%;
+  right: 3%;
+  border-radius: 6px;
+  background: rgb(0 102 179 / 0.18);
+  outline: 2px solid rgb(0 102 179 / 0.7);
+  pointer-events: none;
+  animation: rule-flash 2.4s ease-out forwards;
+}
+@keyframes rule-flash {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Highlights for the Focused View's search (CSS Custom Highlight API). */
+::highlight(focus-search) {
+  background-color: rgb(255 230 0 / 0.55);
+}
+::highlight(focus-search-current) {
+  background-color: rgb(140 220 0 / 0.8);
+}
+
 .textLayer .highlight.element {
   --highlight-bg-color: rgb(255 140 0 / 0.5);
 }
@@ -345,12 +373,6 @@ button.icon {
 }
 .focused-header .muted {
   margin: 0;
-}
-.focused mark.term {
-  background: var(--term-bg);
-  color: inherit;
-  border-radius: 3px;
-  padding: 0 2px;
 }
 .focused-section {
   margin-top: 28px;
@@ -432,6 +454,10 @@ button.icon {
   margin-bottom: 14px;
   scroll-margin-top: 12px;
 }
+.rule:hover {
+  border-color: var(--accent);
+  cursor: pointer;
+}
 .rule-head {
   display: flex;
   align-items: center;
@@ -457,7 +483,8 @@ button.icon {
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--element-bg);
+  background: var(--hover);
+  color: var(--muted);
 }
 .page-link {
   margin-left: auto;

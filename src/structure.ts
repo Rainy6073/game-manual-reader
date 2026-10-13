@@ -100,6 +100,8 @@ export interface Rule {
   /** Subsection heading the rule appears under, e.g. "7.2 Conduct". */
   section: string
   page: number
+  /** Baseline of the rule's first line on its page, in PDF coordinates. */
+  y: number
   blocks: Block[]
 }
 
@@ -364,7 +366,7 @@ async function parseRules(doc: PDFDoc, section: OutlineItem): Promise<Rule[]> {
       const rest = line.items.slice(line.items.indexOf(first) + 1)
       const bodyX = rest.find((i) => i.text.trim())?.x ?? line.x + 36
       current = {
-        rule: { id: first.text.trim(), section: heading, page: line.page, blocks: [] },
+        rule: { id: first.text.trim(), section: heading, page: line.page, y: line.y, blocks: [] },
         lines: [{ ...line, items: rest, x: bodyX, text: rest.map((i) => i.text).join('').trim() }],
         bodyX,
       }
