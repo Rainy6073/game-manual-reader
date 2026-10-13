@@ -7,6 +7,8 @@ interface Props {
   outline: OutlineItem[]
   /** Outline entries containing the current page, outermost first. */
   activePath: string[]
+  /** Start with every Contents entry expanded. */
+  expandAll?: boolean
   onSelectOutline: (item: OutlineItem) => void
   /** null while the manual's text is still being indexed. */
   elements: GameElement[] | null
@@ -66,7 +68,7 @@ export default function Sidebar(props: Props) {
       <section className="sidebar-pane" style={{ flexBasis: `${split * 100}%` }}>
         <h2>Contents</h2>
         {props.outline.length > 0 ? (
-          <Outline items={props.outline} activePath={props.activePath} onSelect={props.onSelectOutline} />
+          <Outline items={props.outline} activePath={props.activePath} expandAll={!!props.expandAll} onSelect={props.onSelectOutline} />
         ) : (
           <p className="muted pane-note">This PDF has no bookmarks.</p>
         )}
@@ -114,18 +116,24 @@ export default function Sidebar(props: Props) {
   )
 }
 
-function Outline({ items, activePath, onSelect }: { items: OutlineItem[]; activePath: string[]; onSelect: (item: OutlineItem) => void }) {
+interface OutlineProps {
+  activePath: string[]
+  expandAll: boolean
+  onSelect: (item: OutlineItem) => void
+}
+
+function Outline({ items, ...rest }: OutlineProps & { items: OutlineItem[] }) {
   return (
     <ul className="outline">
       {items.map((item) => (
-        <OutlineNode key={item.id} item={item} activePath={activePath} onSelect={onSelect} />
+        <OutlineNode key={item.id} item={item} {...rest} />
       ))}
     </ul>
   )
 }
 
-function OutlineNode({ item, activePath, onSelect }: { item: OutlineItem; activePath: string[]; onSelect: (item: OutlineItem) => void }) {
-  const [expanded, setExpanded] = useState(false)
+function OutlineNode({ item, activePath, expandAll, onSelect }: OutlineProps & { item: OutlineItem }) {
+  const [expanded, setExpanded] = useState(expandAll)
   const rowRef = useRef<HTMLButtonElement>(null)
   const hasChildren = item.children.length > 0
   const onPath = activePath.includes(item.id)
@@ -159,7 +167,7 @@ function OutlineNode({ item, activePath, onSelect }: { item: OutlineItem; active
           {item.page != null && <span className="muted">{item.page}</span>}
         </button>
       </div>
-      {hasChildren && expanded && <Outline items={item.children} activePath={activePath} onSelect={onSelect} />}
+      {hasChildren && expanded && <Outline items={item.children} activePath={activePath} expandAll={expandAll} onSelect={onSelect} />}
     </li>
   )
 }

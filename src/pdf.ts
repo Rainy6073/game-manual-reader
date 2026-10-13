@@ -17,7 +17,8 @@ export interface OutlineItem {
 
 export function loadPdf(source: string | ArrayBuffer): Promise<PDFDoc> {
   const params = typeof source === 'string' ? { url: source } : { data: source }
-  return pdfjs.getDocument(params).promise
+  // Font names (e.g. "Roboto-Bold") are needed to rebuild formatting for the Focused View.
+  return pdfjs.getDocument({ ...params, fontExtraProperties: true }).promise
 }
 
 /** Resolves the PDF's bookmarks into a tree with 1-based page numbers. */
@@ -160,13 +161,15 @@ export interface GameElement {
   name: string
   /** Matches the term in the manual's capitalized form, including plurals. */
   pattern: RegExp
+  /** The ARENA subsection that describes this element. */
+  section: OutlineItem
 }
 
 const stripNumber = (title: string) => title.replace(/^[\d.]+\s*/, '').trim()
 const isAllCaps = (s: string) => /[A-Z]/.test(s) && !/[a-z]/.test(s)
 const SCORING_HEADING = /SCORING ELEMENTS?|GAME PIECES?/
 
-function elementFor(name: string): GameElement {
+function elementFor(name: string, section: OutlineItem): GameElement {
   // Match singular and plural forms: "DRIVER STATIONS" also matches "DRIVER STATION",
   // "HUB" matches "HUBS", "HUBs" and "HUB's".
   const singular = /[^S]S$/.test(name) && name.length > 4 ? name.slice(0, -1) : name
@@ -174,7 +177,7 @@ function elementFor(name: string): GameElement {
     .split(/\s+/)
     .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('\\s+')
-  return { name, pattern: new RegExp(`(?<![A-Za-z])${body}(?:ES|S|es|s|'s|’s)?(?![A-Za-z])`, 'g') }
+  return { name, section, pattern: new RegExp(`(?<![A-Za-z])${body}(?:ES|S|es|s|'s|’s)?(?![A-Za-z])`, 'g') }
 }
 
 /** Common capitalized terms that are never the scoring element itself. */
@@ -188,27 +191,27 @@ const GENERIC_TERMS = new Set(['ROBOT', 'ROBOTS', 'ALLIANCE', 'MATCH', 'FIELD', 
 export function findGameElements(outline: OutlineItem[], index: PageText[]): GameElement[] {
   const arena = outline.find((item) => /\bARENA\b/.test(item.title))
   if (!arena) return []
-  const names: string[] = []
+  const found = new Map<string, OutlineItem>()
+  const add = (name: string, section: OutlineItem) => {
+    if (!found.has(name)) found.set(name, section)
+  }
 
   const visit = (items: OutlineItem[]) => {
     for (const item of items) {
       const title = stripNumber(item.title)
       if (SCORING_HEADING.test(title)) {
-        const children = item.children.map((c) => stripNumber(c.title)).filter(isAllCaps)
-        if (children.length) names.push(...children)
-        else {
-          const guess = guessScoringElement(item, title, index)
-          names.push(guess ?? title)
-        }
+        const children = item.children.filter((c) => isAllCaps(stripNumber(c.title)))
+        if (children.length) children.forEach((c) => add(stripNumber(c.title), c))
+        else add(guessScoringElement(item, title, index) ?? title, item)
         continue
       }
-      if (isAllCaps(title)) names.push(title)
+      if (isAllCaps(title)) add(title, item)
       visit(item.children)
     }
   }
   visit(arena.children)
 
-  return [...new Set(names)].map(elementFor)
+  return [...found].map(([name, section]) => elementFor(name, section))
 }
 
 /** For a scoring section with no sub-headings, picks its most frequent all-caps term. */

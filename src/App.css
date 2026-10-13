@@ -268,15 +268,18 @@ button.icon {
 }
 
 .textLayer .highlight {
-  --highlight-bg-color: rgb(255 200 0 / 0.45);
-  --highlight-selected-bg-color: rgb(255 120 0 / 0.6);
+  --highlight-bg-color: rgb(255 230 0 / 0.5);
+  --highlight-selected-bg-color: rgb(140 220 0 / 0.65);
   margin: -1px;
   padding: 1px;
   border-radius: 3px;
 }
+.textLayer .highlight.selected {
+  outline: 2px solid rgb(70 160 0);
+}
 
 .textLayer .highlight.element {
-  --highlight-bg-color: rgb(0 170 255 / 0.35);
+  --highlight-bg-color: rgb(255 140 0 / 0.5);
 }
 
 .filter-banner {
@@ -286,13 +289,188 @@ button.icon {
   gap: 12px;
   flex-wrap: wrap;
   width: 100%;
-  max-width: 720px;
+  max-width: 820px;
   padding: 8px 8px 8px 14px;
   border-radius: 8px;
   background: var(--surface);
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
+.filter-summary {
+  flex: 1;
+  min-width: 12em;
+}
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.view-toggle button {
+  border: none;
+  border-radius: 0;
+  padding: 5px 12px;
+}
+.view-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+.view-toggle button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* --- Focused View --- */
+.focused {
+  width: 100%;
+  max-width: 820px;
+  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px 36px 40px;
+  line-height: 1.55;
+  font-size: 16px;
+}
+.focused-header .eyebrow {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.focused-header h1 {
+  margin: 4px 0 6px;
+  font-size: 30px;
+  letter-spacing: 0.02em;
+}
+.focused-header .muted {
+  margin: 0;
+}
+.focused mark.term {
+  background: var(--term-bg);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.focused-section {
+  margin-top: 28px;
+}
+.focused-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 14px;
+}
+.focused-section-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.focused p {
+  margin: 0 0 10px;
+}
+.focused .violation {
+  font-style: italic;
+  color: var(--violation);
+}
+.focused .violation em {
+  font-style: inherit;
+}
+.note-box {
+  background: var(--note-bg);
+  border-left: 4px solid var(--note-border);
+  border-radius: 4px;
+  padding: 12px 16px 2px;
+  margin: 4px 0 14px;
+}
+.list-item {
+  display: flex;
+  gap: 8px;
+}
+.list-marker {
+  flex: 0 0 1.4em;
+  text-align: right;
+}
+.list-item p {
+  flex: 1;
+}
+.block-heading {
+  margin: 18px 0 8px;
+}
+.figure {
+  margin: 8px 0 18px;
+}
+.figure figcaption {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 6px;
+}
+.figure canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 4px;
+}
+.rule-group {
+  margin: 26px 0 10px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  scroll-margin-top: 12px;
+}
+.rule {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px 6px;
+  margin-bottom: 14px;
+  scroll-margin-top: 12px;
+}
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rule-id {
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 14px;
+}
+.rule-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+.mention {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--element-bg);
+}
+.page-link {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--accent);
+  padding: 2px 4px;
+  font-size: 13px;
+}
+.page-link:hover {
+  text-decoration: underline;
+}
+
 .element-chip {
   background: var(--element-bg);
   color: var(--text);
@@ -401,5 +579,11 @@ button.icon {
     flex: 1;
     width: auto;
     min-width: 0;
+  }
+  .focused {
+    padding: 18px 16px 28px;
+  }
+  .rule {
+    padding: 12px 12px 4px;
   }
 }

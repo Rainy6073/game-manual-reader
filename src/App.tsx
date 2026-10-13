@@ -15,9 +15,12 @@ import {
   type PDFDoc,
   type SearchMatch,
 } from './pdf'
+import { DESCRIPTION_ID, ruleAnchor, sectionAnchor } from './anchors'
+import FocusedView, { type FocusData } from './FocusedView'
 import PdfPage from './PdfPage'
 import SearchBar from './SearchBar'
 import Sidebar from './Sidebar'
+import { blocksText, extractRules, extractSection } from './structure'
 import './App.css'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
@@ -54,6 +57,10 @@ export default function App() {
   const [matchIndex, setMatchIndex] = useState(0)
   const [scrollRequest, setScrollRequest] = useState(0)
   const [element, setElement] = useState<GameElement | null>(null)
+  const [focused, setFocused] = useState(false)
+  const [focusData, setFocusData] = useState<{ doc: PDFDoc; name: string; data: FocusData } | null>(null)
+  const [focusActive, setFocusActive] = useState(DESCRIPTION_ID)
+  const pendingPageRef = useRef<number | null>(null)
 
   const open = useCallback(async (source: string | ArrayBuffer, name: string) => {
     setLoading(true)
@@ -74,6 +81,7 @@ export default function App() {
         return { doc, name, outline, sizes }
       })
       setElement(null)
+      setFocused(false)
       setCurrentPage(1)
       setPageInput('1')
       viewerRef.current?.scrollTo({ top: 0 })
@@ -116,9 +124,11 @@ export default function App() {
   useEffect(() => {
     if (!loaded || textIndex?.doc === loaded.doc) return
     let cancelled = false
-    buildTextIndex(loaded.doc).then((pages) => {
-      if (!cancelled) setTextIndex({ doc: loaded.doc, pages })
-    })
+    buildTextIndex(loaded.doc)
+      .then((pages) => {
+        if (!cancelled) setTextIndex({ doc: loaded.doc, pages })
+      })
+      .catch(() => {}) // the document was closed (e.g. another one was opened)
     return () => {
       cancelled = true
     }
@@ -167,15 +177,86 @@ export default function App() {
     [loaded, currentPage],
   )
 
-  // Start a newly filtered (or unfiltered) view from the top.
+  // Start a newly filtered (or unfiltered) view from the top, or at a page
+  // requested from the Focused View.
   useLayoutEffect(() => {
-    viewerRef.current?.scrollTo({ top: 0 })
-    if (visiblePages.length) {
-      setCurrentPage(visiblePages[0])
-      setPageInput(String(visiblePages[0]))
+    const pending = pendingPageRef.current
+    pendingPageRef.current = null
+    const viewer = viewerRef.current
+    if (!viewer) return
+    const target = pending != null ? visiblePages.find((p) => p >= pending) ?? visiblePages[visiblePages.length - 1] : null
+    const el = target != null && !focused ? viewer.querySelector<HTMLElement>(`[data-page="${target}"]`) : null
+    viewer.scrollTo({ top: el ? el.offsetTop - 16 : 0 })
+    const page = target ?? visiblePages[0]
+    if (page != null) {
+      setCurrentPage(page)
+      setPageInput(String(page))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [element])
+  }, [element, focused])
+
+  // --- Focused View ----------------------------------------------------------
+
+  const selectElement = useCallback((el: GameElement | null) => {
+    setElement(el)
+    if (!el) setFocused(false)
+  }, [])
+
+  // FIELD elements include every part of the ARENA, so the FIELD view also covers
+  // rules that mention any of them (but not FIELD STAFF, who are people).
+  const focusTerms = useMemo(() => {
+    if (!element) return []
+    if (element.name !== 'FIELD' || !gameElements) return [element]
+    return [element, ...gameElements.filter((e) => e !== element && !/\bSTAFF\b/.test(e.name))]
+  }, [element, gameElements])
+
+  useEffect(() => {
+    if (!focused || !element || !loaded) return
+    if (focusData?.doc === loaded.doc && focusData.name === element.name) return
+    let cancelled = false
+    const rulesSection = loaded.outline.find((i) => /Game Rules/i.test(i.title))
+    Promise.all([extractSection(loaded.doc, element.section), rulesSection ? extractRules(loaded.doc, rulesSection) : []]).then(
+      ([description, rules]) => {
+        if (cancelled) return
+        const pattern = new RegExp(focusTerms.map((t) => t.pattern.source).join('|'))
+        const relevant = rules.filter((r) => pattern.test(blocksText(r.blocks)))
+        setFocusData({ doc: loaded.doc, name: element.name, data: { description, rules: relevant } })
+        setFocusActive(DESCRIPTION_ID)
+      },
+      () => {}, // the document was closed while extracting
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [focused, element, loaded, focusTerms, focusData])
+
+  const currentFocus = focused && element && focusData?.doc === loaded?.doc && focusData?.name === element.name ? focusData.data : null
+
+  /** Contents for the Focused View: the description, then rules grouped by subsection. */
+  const focusOutline = useMemo((): OutlineItem[] => {
+    if (!currentFocus || !element) return []
+    const descPage = currentFocus.description[0]?.page ?? element.section.page
+    const items: OutlineItem[] = [{ id: DESCRIPTION_ID, title: `Description: ${element.section.title}`, page: descPage, end: descPage ?? 0, children: [] }]
+    for (const rule of currentFocus.rules) {
+      let group = items.find((i) => i.id === sectionAnchor(rule.section))
+      if (!group) items.push((group = { id: sectionAnchor(rule.section), title: rule.section, page: rule.page, end: rule.page, children: [] }))
+      // Short label for Contents: the rule's bold summary, without the leading asterisk.
+      const first = rule.blocks.find((b) => b.kind === 'para')
+      const title = first?.kind === 'para' ? first.runs.filter((r) => r.bold).map((r) => r.text).join('').replace(/^\*/, '').trim() : ''
+      group.children.push({ id: ruleAnchor(rule.id), title: `${rule.id} ${title}`.trim(), page: rule.page, end: rule.page, children: [] })
+    }
+    return items
+  }, [currentFocus, element])
+
+  const focusActivePath = useMemo(() => {
+    const group = focusOutline.find((g) => g.id === focusActive || g.children.some((c) => c.id === focusActive))
+    return group ? [group.id, ...(group.id === focusActive ? [] : [focusActive])] : []
+  }, [focusOutline, focusActive])
+
+  const openPageFromFocus = useCallback((page: number) => {
+    pendingPageRef.current = page
+    setFocused(false)
+  }, [])
 
   const scrollToPage = useCallback((page: number) => {
     const el = viewerRef.current?.querySelector<HTMLElement>(`[data-page="${page}"]`)
@@ -192,7 +273,8 @@ export default function App() {
       frame = requestAnimationFrame(() => {
         const mid = viewer.scrollTop + viewer.clientHeight / 3
         const pages = viewer.querySelectorAll<HTMLElement>('[data-page]')
-        let page = Number(pages[0]?.dataset.page ?? 1)
+        if (pages.length === 0) return
+        let page = Number(pages[0].dataset.page)
         for (const el of pages) {
           if (el.offsetTop <= mid) page = Number(el.dataset.page)
           else break
@@ -254,9 +336,10 @@ export default function App() {
   }, [scale])
 
   // Pinch to zoom: trackpads (ctrl+wheel, or Safari gesture events) and touchscreens.
+  // The Focused View is plain text, so it keeps the browser's own zoom.
   useEffect(() => {
     const viewer = viewerRef.current
-    if (!viewer || !loaded) return
+    if (!viewer || !loaded || focused) return
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
@@ -310,7 +393,7 @@ export default function App() {
       viewer.removeEventListener('touchend', onTouchEnd)
       viewer.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [loaded, zoomTo])
+  }, [loaded, focused, zoomTo])
 
   // --- Search ------------------------------------------------------------
 
@@ -364,6 +447,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
+      // The Focused View is ordinary text, so the browser's own find and zoom apply.
+      if (focused) return
       if (mod && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         openSearch()
@@ -396,6 +481,10 @@ export default function App() {
   }
 
   const selectOutline = (item: OutlineItem) => {
+    if (focused) {
+      document.getElementById(item.id)?.scrollIntoView({ block: 'start' })
+      return
+    }
     if (item.page == null) return
     const inRange = visiblePages.find((p) => p >= item.page! && p <= item.end)
     goToPage(inRange ?? item.page)
@@ -426,7 +515,7 @@ export default function App() {
           {loaded && <span className="doc-name">{loaded.name}</span>}
         </div>
 
-        {loaded && (
+        {loaded && !focused && (
           <div className="controls">
             <form
               className="page-nav"
@@ -487,17 +576,18 @@ export default function App() {
       <div className="body">
         {sidebarOpen && loaded && (
           <Sidebar
-            outline={shownOutline}
-            activePath={activePath}
+            outline={focused ? focusOutline : shownOutline}
+            activePath={focused ? focusActivePath : activePath}
+            expandAll={focused}
             onSelectOutline={selectOutline}
             elements={gameElements}
             elementPageCounts={elementPageCounts}
             selectedElement={element?.name ?? null}
-            onSelectElement={setElement}
+            onSelectElement={selectElement}
           />
         )}
 
-        {searchOpen && loaded && (
+        {searchOpen && loaded && !focused && (
           <SearchBar
             query={query}
             onQueryChange={setQuery}
@@ -516,14 +606,41 @@ export default function App() {
           {loading && <div className="banner">Loading manual…</div>}
           {element && (
             <div className="filter-banner">
-              <span>
-                Showing <strong>{visiblePages.length}</strong> of {total} pages mentioning{' '}
+              <div className="view-toggle" role="group" aria-label="View">
+                <button aria-pressed={!focused} onClick={() => setFocused(false)}>
+                  Pages
+                </button>
+                <button aria-pressed={focused} onClick={() => setFocused(true)}>
+                  Focused View
+                </button>
+              </div>
+              <span className="filter-summary">
+                {focused ? (
+                  <>
+                    Description and {currentFocus ? currentFocus.rules.length : '…'} game rules for{' '}
+                  </>
+                ) : (
+                  <>
+                    <strong>{visiblePages.length}</strong> of {total} pages mention{' '}
+                  </>
+                )}
                 <mark className="element-chip">{element.name}</mark>
               </span>
-              <button onClick={() => setElement(null)}>Show full manual</button>
+              <button onClick={() => selectElement(null)}>Show full manual</button>
             </div>
           )}
+          {loaded && focused && element && (
+            <FocusedView
+              doc={loaded.doc}
+              element={element}
+              terms={focusTerms}
+              data={currentFocus}
+              onOpenPage={openPageFromFocus}
+              onActiveChange={setFocusActive}
+            />
+          )}
           {loaded &&
+            !focused &&
             visiblePages.map((page) => (
               <PdfPage
                 key={`${loaded.name}-${page}`}
