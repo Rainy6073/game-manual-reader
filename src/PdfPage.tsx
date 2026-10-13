@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { pdfjs, type PDFDoc } from './pdf'
+import { pdfjs, type HighlightSegment, type PDFDoc } from './pdf'
 
 interface Props {
   doc: PDFDoc
@@ -7,43 +7,52 @@ interface Props {
   scale: number
   /** Unscaled page size, used to reserve space before the page renders. */
   baseSize: { width: number; height: number }
+  highlights?: HighlightSegment[]
+  /** Bumped by the parent to ask this page to scroll its selected match into view. */
+  scrollRequest?: number
 }
 
-export default function PdfPage({ doc, pageNumber, scale, baseSize }: Props) {
+const EMPTY: HighlightSegment[] = []
+
+export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights = EMPTY, scrollRequest = 0 }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasHostRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
+  // Text spans from the TextLayer, plus their original strings, for highlighting.
+  const [textDivs, setTextDivs] = useState<{ divs: HTMLElement[]; strs: string[] } | null>(null)
+  const handledScrollRef = useRef(0)
 
   // Only render pages near the viewport so a 150+ page manual stays fast.
   useEffect(() => {
     const el = wrapperRef.current
     if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => setVisible(entry.isIntersecting),
-      { rootMargin: '800px 0px' },
-    )
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
+      rootMargin: '800px 0px',
+    })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible) {
+      setTextDivs(null)
+      return
+    }
     let cancelled = false
     let renderTask: ReturnType<pdfjs.PDFPageProxy['render']> | null = null
     let textLayer: pdfjs.TextLayer | null = null
 
-    ;(async () => {
+    const run = async () => {
       const page = await doc.getPage(pageNumber)
       if (cancelled) return
       const viewport = page.getViewport({ scale })
-      const canvas = canvasRef.current!
       const dpr = window.devicePixelRatio || 1
+
+      // Render offscreen, then swap in, so zooming never flashes a blank page.
+      const canvas = document.createElement('canvas')
       canvas.width = Math.floor(viewport.width * dpr)
       canvas.height = Math.floor(viewport.height * dpr)
-      canvas.style.width = `${viewport.width}px`
-      canvas.style.height = `${viewport.height}px`
-
       renderTask = page.render({
         canvas,
         viewport,
@@ -56,23 +65,83 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize }: Props) {
         throw err
       }
       if (cancelled) return
+      canvasHostRef.current?.replaceChildren(canvas)
 
-      const container = textRef.current!
-      container.replaceChildren()
+      const container = document.createElement('div')
+      container.className = 'textLayer'
       textLayer = new pdfjs.TextLayer({
         textContentSource: page.streamTextContent(),
         container,
         viewport,
       })
-      await textLayer.render().catch(() => {})
-    })()
+      try {
+        await textLayer.render()
+      } catch {
+        return
+      }
+      if (cancelled || !textRef.current) return
+      textRef.current.replaceChildren(container)
+      setTextDivs({ divs: textLayer.textDivs, strs: textLayer.textContentItemsStr })
+    }
+
+    // Re-renders caused by zooming are debounced so pinch gestures stay smooth;
+    // the existing bitmap is stretched by CSS in the meantime.
+    const hasContent = !!canvasHostRef.current?.firstChild
+    const timer = setTimeout(run, hasContent ? 150 : 0)
 
     return () => {
       cancelled = true
+      clearTimeout(timer)
       renderTask?.cancel()
       textLayer?.cancel()
     }
   }, [doc, pageNumber, scale, visible])
+
+  // Apply search highlights to the text layer spans.
+  useEffect(() => {
+    if (!textDivs) return
+    const { divs, strs } = textDivs
+    const byItem = new Map<number, HighlightSegment[]>()
+    for (const seg of highlights) {
+      if (seg.end <= seg.start) continue
+      const list = byItem.get(seg.item) ?? []
+      list.push(seg)
+      byItem.set(seg.item, list)
+    }
+
+    for (const [item, segs] of byItem) {
+      const div = divs[item]
+      const str = strs[item]
+      if (!div || str === undefined) continue
+      segs.sort((a, b) => a.start - b.start)
+      const nodes: Node[] = []
+      let cursor = 0
+      for (const seg of segs) {
+        if (seg.start > cursor) nodes.push(document.createTextNode(str.slice(cursor, seg.start)))
+        const mark = document.createElement('span')
+        mark.className = seg.selected ? 'highlight selected' : 'highlight'
+        mark.textContent = str.slice(seg.start, seg.end)
+        nodes.push(mark)
+        cursor = Math.max(cursor, seg.end)
+      }
+      if (cursor < str.length) nodes.push(document.createTextNode(str.slice(cursor)))
+      div.replaceChildren(...nodes)
+    }
+
+    if (scrollRequest !== handledScrollRef.current) {
+      const selected = textRef.current?.querySelector('.highlight.selected')
+      if (selected) {
+        handledScrollRef.current = scrollRequest
+        selected.scrollIntoView({ block: 'center', inline: 'nearest' })
+      }
+    }
+
+    return () => {
+      for (const item of byItem.keys()) {
+        if (divs[item]) divs[item].textContent = strs[item]
+      }
+    }
+  }, [textDivs, highlights, scrollRequest])
 
   const width = baseSize.width * scale
   const height = baseSize.height * scale
@@ -94,8 +163,8 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize }: Props) {
     >
       {visible && (
         <>
-          <canvas ref={canvasRef} />
-          <div ref={textRef} className="textLayer" />
+          <div ref={canvasHostRef} className="canvas-host" />
+          <div ref={textRef} className="text-host" />
         </>
       )}
     </div>

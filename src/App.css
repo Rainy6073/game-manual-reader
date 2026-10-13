@@ -94,6 +94,7 @@ button.icon {
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative;
 }
 
 .sidebar {
@@ -157,6 +158,8 @@ button.icon {
   align-items: center;
   gap: 16px;
   position: relative;
+  /* We handle pinch-zoom ourselves instead of letting the browser zoom the page. */
+  touch-action: pan-x pan-y;
 }
 /* Keep wide (zoomed) pages scrollable from their left edge. */
 .viewer > .page {
@@ -175,6 +178,56 @@ button.icon {
 }
 .page canvas {
   display: block;
+}
+/* The canvas stretches with the page while a zoom re-render is pending. */
+.canvas-host,
+.canvas-host canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.textLayer .highlight {
+  --highlight-bg-color: rgb(255 200 0 / 0.45);
+  --highlight-selected-bg-color: rgb(255 120 0 / 0.6);
+  margin: -1px;
+  padding: 1px;
+  border-radius: 3px;
+}
+
+.search-bar {
+  position: absolute;
+  top: 10px;
+  right: 24px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.search-bar input {
+  width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.search-bar input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.search-status {
+  min-width: 5.5em;
+  text-align: center;
+  white-space: nowrap;
+}
+.search-status.none {
+  color: #d33;
 }
 
 .banner {
@@ -220,5 +273,26 @@ button.icon {
   }
   .viewer {
     padding: 12px 8px;
+  }
+  .toolbar {
+    gap: 8px;
+  }
+  .brand strong {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .actions button {
+    padding: 5px 9px;
+    font-size: 14px;
+  }
+  .search-bar {
+    left: 8px;
+    right: 8px;
+  }
+  .search-bar input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
   }
 }
