@@ -7,6 +7,8 @@
   --hover: #e8edf3;
   --accent: #0066b3;
   --viewer-bg: #e4e7eb;
+  --active: #dde1e6;
+  --element-bg: rgb(0 170 255 / 0.25);
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 15px;
@@ -23,6 +25,7 @@
     --hover: #2a3039;
     --accent: #3b9aea;
     --viewer-bg: #0f1114;
+    --active: #353b45;
   }
 }
 

@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildTextIndex,
+  filterOutline,
+  findElement,
+  findGameElements,
   getOutline,
   loadPdf,
+  outlinePathAt,
   search,
+  type GameElement,
   type HighlightSegment,
   type OutlineItem,
   type PageText,
   type PDFDoc,
+  type SearchMatch,
 } from './pdf'
 import PdfPage from './PdfPage'
 import SearchBar from './SearchBar'
+import Sidebar from './Sidebar'
 import './App.css'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
@@ -46,6 +53,7 @@ export default function App() {
   const [textIndex, setTextIndex] = useState<{ doc: PDFDoc; pages: PageText[] } | null>(null)
   const [matchIndex, setMatchIndex] = useState(0)
   const [scrollRequest, setScrollRequest] = useState(0)
+  const [element, setElement] = useState<GameElement | null>(null)
 
   const open = useCallback(async (source: string | ArrayBuffer, name: string) => {
     setLoading(true)
@@ -65,6 +73,7 @@ export default function App() {
         prev?.doc.loadingTask.destroy()
         return { doc, name, outline, sizes }
       })
+      setElement(null)
       setCurrentPage(1)
       setPageInput('1')
       viewerRef.current?.scrollTo({ top: 0 })
@@ -101,6 +110,73 @@ export default function App() {
     setScale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
   }, [loaded])
 
+  // --- Text index & game elements -----------------------------------------
+
+  // Extract the document's text in the background; search and game elements use it.
+  useEffect(() => {
+    if (!loaded || textIndex?.doc === loaded.doc) return
+    let cancelled = false
+    buildTextIndex(loaded.doc).then((pages) => {
+      if (!cancelled) setTextIndex({ doc: loaded.doc, pages })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [loaded, textIndex])
+
+  const indexReady = !!loaded && textIndex?.doc === loaded.doc
+  const pagesText = indexReady ? textIndex!.pages : null
+
+  const gameElements = useMemo(
+    () => (loaded && pagesText ? findGameElements(loaded.outline, pagesText) : null),
+    [loaded, pagesText],
+  )
+
+  const elementResults = useMemo(() => {
+    const results = new Map<string, SearchMatch[]>()
+    if (!loaded || !gameElements || !pagesText) return results
+    // Skip front matter (cover, table of contents) before the first bookmarked section.
+    const firstSection = Math.min(...loaded.outline.map((i) => i.page ?? Infinity))
+    const from = Number.isFinite(firstSection) ? firstSection : 1
+    for (const el of gameElements) results.set(el.name, findElement(pagesText, el).filter((m) => m.page >= from))
+    return results
+  }, [loaded, gameElements, pagesText])
+
+  const elementPageCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const [name, ms] of elementResults) counts.set(name, new Set(ms.map((m) => m.page)).size)
+    return counts
+  }, [elementResults])
+
+  const elementMatches = useMemo(() => (element ? elementResults.get(element.name) ?? [] : []), [element, elementResults])
+
+  /** Pages currently shown: every page, or only those mentioning the selected game element. */
+  const visiblePages = useMemo(() => {
+    if (!loaded) return []
+    if (element) return [...new Set(elementMatches.map((m) => m.page))].sort((a, b) => a - b)
+    return loaded.sizes.map((_, i) => i + 1)
+  }, [loaded, element, elementMatches])
+  const visibleSet = useMemo(() => new Set(visiblePages), [visiblePages])
+
+  const shownOutline = useMemo(
+    () => (!loaded ? [] : element ? filterOutline(loaded.outline, visibleSet) : loaded.outline),
+    [loaded, element, visibleSet],
+  )
+  const activePath = useMemo(
+    () => (loaded ? outlinePathAt(loaded.outline, currentPage).map((i) => i.id) : []),
+    [loaded, currentPage],
+  )
+
+  // Start a newly filtered (or unfiltered) view from the top.
+  useLayoutEffect(() => {
+    viewerRef.current?.scrollTo({ top: 0 })
+    if (visiblePages.length) {
+      setCurrentPage(visiblePages[0])
+      setPageInput(String(visiblePages[0]))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [element])
+
   const scrollToPage = useCallback((page: number) => {
     const el = viewerRef.current?.querySelector<HTMLElement>(`[data-page="${page}"]`)
     if (el) viewerRef.current!.scrollTo({ top: el.offsetTop - 16 })
@@ -116,7 +192,7 @@ export default function App() {
       frame = requestAnimationFrame(() => {
         const mid = viewer.scrollTop + viewer.clientHeight / 3
         const pages = viewer.querySelectorAll<HTMLElement>('[data-page]')
-        let page = 1
+        let page = Number(pages[0]?.dataset.page ?? 1)
         for (const el of pages) {
           if (el.offsetTop <= mid) page = Number(el.dataset.page)
           else break
@@ -243,22 +319,10 @@ export default function App() {
     setSearchFocus((n) => n + 1)
   }, [])
 
-  // Extract the document's text the first time search is opened.
-  useEffect(() => {
-    if (!searchOpen || !loaded || textIndex?.doc === loaded.doc) return
-    let cancelled = false
-    buildTextIndex(loaded.doc).then((pages) => {
-      if (!cancelled) setTextIndex({ doc: loaded.doc, pages })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [searchOpen, loaded, textIndex])
-
-  const indexReady = !!loaded && textIndex?.doc === loaded.doc
+  // Search only the pages currently shown.
   const matches = useMemo(
-    () => (searchOpen && indexReady ? search(textIndex!.pages, query) : []),
-    [searchOpen, indexReady, textIndex, query],
+    () => (searchOpen && pagesText ? search(pagesText, query).filter((m) => visibleSet.has(m.page)) : []),
+    [searchOpen, pagesText, query, visibleSet],
   )
 
   const goToMatch = useCallback(
@@ -289,13 +353,11 @@ export default function App() {
 
   const highlightsByPage = useMemo(() => {
     const map = new Map<number, HighlightSegment[]>()
-    matches.forEach((m, i) => {
-      const list = map.get(m.page) ?? []
-      for (const seg of m.segments) list.push({ ...seg, selected: i === matchIndex })
-      map.set(m.page, list)
-    })
+    const add = (page: number, segs: HighlightSegment[]) => map.set(page, [...(map.get(page) ?? []), ...segs])
+    for (const m of elementMatches) add(m.page, m.segments.map((seg) => ({ ...seg, selected: false, element: true })))
+    matches.forEach((m, i) => add(m.page, m.segments.map((seg) => ({ ...seg, selected: i === matchIndex }))))
     return map
-  }, [matches, matchIndex])
+  }, [elementMatches, matches, matchIndex])
 
   // --- Keyboard shortcuts --------------------------------------------------
 
@@ -323,6 +385,21 @@ export default function App() {
   })
 
   const total = loaded?.doc.numPages ?? 0
+  const pos = visiblePages.indexOf(currentPage)
+  const prevPage = pos > 0 ? visiblePages[pos - 1] : null
+  const nextPage = pos !== -1 && pos < visiblePages.length - 1 ? visiblePages[pos + 1] : null
+
+  /** Jumps to the first shown page at or after `page` (or the last shown page). */
+  const goToPage = (page: number) => {
+    const target = visiblePages.find((p) => p >= page) ?? visiblePages[visiblePages.length - 1]
+    if (target != null) scrollToPage(target)
+  }
+
+  const selectOutline = (item: OutlineItem) => {
+    if (item.page == null) return
+    const inRange = visiblePages.find((p) => p >= item.page! && p <= item.end)
+    goToPage(inRange ?? item.page)
+  }
 
   return (
     <div
@@ -356,10 +433,10 @@ export default function App() {
               onSubmit={(e) => {
                 e.preventDefault()
                 const n = Math.min(total, Math.max(1, parseInt(pageInput, 10) || 1))
-                scrollToPage(n)
+                goToPage(n)
               }}
             >
-              <button type="button" className="icon" disabled={currentPage <= 1} onClick={() => scrollToPage(currentPage - 1)} title="Previous page">
+              <button type="button" className="icon" disabled={prevPage == null} onClick={() => prevPage != null && scrollToPage(prevPage)} title="Previous page">
                 ‹
               </button>
               <input
@@ -369,7 +446,7 @@ export default function App() {
                 aria-label="Page number"
               />
               <span className="muted">/ {total}</span>
-              <button type="button" className="icon" disabled={currentPage >= total} onClick={() => scrollToPage(currentPage + 1)} title="Next page">
+              <button type="button" className="icon" disabled={nextPage == null} onClick={() => nextPage != null && scrollToPage(nextPage)} title="Next page">
                 ›
               </button>
             </form>
@@ -409,14 +486,15 @@ export default function App() {
 
       <div className="body">
         {sidebarOpen && loaded && (
-          <aside className="sidebar">
-            <h2>Contents</h2>
-            {loaded.outline.length > 0 ? (
-              <Outline items={loaded.outline} onSelect={scrollToPage} />
-            ) : (
-              <p className="muted">This PDF has no bookmarks.</p>
-            )}
-          </aside>
+          <Sidebar
+            outline={shownOutline}
+            activePath={activePath}
+            onSelectOutline={selectOutline}
+            elements={gameElements}
+            elementPageCounts={elementPageCounts}
+            selectedElement={element?.name ?? null}
+            onSelectElement={setElement}
+          />
         )}
 
         {searchOpen && loaded && (
@@ -436,16 +514,25 @@ export default function App() {
         <main className="viewer" ref={viewerRef}>
           {error && <div className="banner error">{error}</div>}
           {loading && <div className="banner">Loading manual…</div>}
+          {element && (
+            <div className="filter-banner">
+              <span>
+                Showing <strong>{visiblePages.length}</strong> of {total} pages mentioning{' '}
+                <mark className="element-chip">{element.name}</mark>
+              </span>
+              <button onClick={() => setElement(null)}>Show full manual</button>
+            </div>
+          )}
           {loaded &&
-            loaded.sizes.map((size, i) => (
+            visiblePages.map((page) => (
               <PdfPage
-                key={`${loaded.name}-${i}`}
+                key={`${loaded.name}-${page}`}
                 doc={loaded.doc}
-                pageNumber={i + 1}
+                pageNumber={page}
                 scale={scale}
-                baseSize={size}
-                highlights={highlightsByPage.get(i + 1)}
-                scrollRequest={matches[matchIndex]?.page === i + 1 ? scrollRequest : undefined}
+                baseSize={loaded.sizes[page - 1]}
+                highlights={highlightsByPage.get(page)}
+                scrollRequest={matches[matchIndex]?.page === page ? scrollRequest : undefined}
               />
             ))}
         </main>
@@ -453,38 +540,5 @@ export default function App() {
 
       {dragging && <div className="drop-overlay">Drop a game manual PDF to open it</div>}
     </div>
-  )
-}
-
-function Outline({ items, onSelect }: { items: OutlineItem[]; onSelect: (page: number) => void }) {
-  return (
-    <ul className="outline">
-      {items.map((item, i) => (
-        <OutlineNode key={i} item={item} onSelect={onSelect} />
-      ))}
-    </ul>
-  )
-}
-
-function OutlineNode({ item, onSelect }: { item: OutlineItem; onSelect: (page: number) => void }) {
-  const [expanded, setExpanded] = useState(false)
-  const hasChildren = item.children.length > 0
-  return (
-    <li>
-      <div className="outline-row">
-        {hasChildren ? (
-          <button className="twisty" onClick={() => setExpanded((e) => !e)} aria-label={expanded ? 'Collapse' : 'Expand'}>
-            {expanded ? '▾' : '▸'}
-          </button>
-        ) : (
-          <span className="twisty" />
-        )}
-        <button className="outline-link" disabled={item.page == null} onClick={() => item.page && onSelect(item.page)}>
-          <span>{item.title}</span>
-          {item.page != null && <span className="muted">{item.page}</span>}
-        </button>
-      </div>
-      {hasChildren && expanded && <Outline items={item.children} onSelect={onSelect} />}
-    </li>
   )
 }

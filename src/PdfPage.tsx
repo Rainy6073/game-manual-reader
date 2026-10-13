@@ -113,16 +113,19 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
       const div = divs[item]
       const str = strs[item]
       if (!div || str === undefined) continue
-      segs.sort((a, b) => a.start - b.start)
+      // Search matches come after element matches, so on overlap the search highlight wins.
+      segs.sort((a, b) => a.start - b.start || Number(!!a.element) - Number(!!b.element))
       const nodes: Node[] = []
       let cursor = 0
       for (const seg of segs) {
-        if (seg.start > cursor) nodes.push(document.createTextNode(str.slice(cursor, seg.start)))
+        const start = Math.max(seg.start, cursor)
+        if (seg.end <= start) continue
+        if (start > cursor) nodes.push(document.createTextNode(str.slice(cursor, start)))
         const mark = document.createElement('span')
-        mark.className = seg.selected ? 'highlight selected' : 'highlight'
-        mark.textContent = str.slice(seg.start, seg.end)
+        mark.className = `highlight${seg.element ? ' element' : ''}${seg.selected ? ' selected' : ''}`
+        mark.textContent = str.slice(start, seg.end)
         nodes.push(mark)
-        cursor = Math.max(cursor, seg.end)
+        cursor = seg.end
       }
       if (cursor < str.length) nodes.push(document.createTextNode(str.slice(cursor)))
       div.replaceChildren(...nodes)
