@@ -63,8 +63,6 @@ export default function App() {
   // A spot in the PDF to scroll to once the Pages view is shown (y in PDF space).
   const pendingPageRef = useRef<{ page: number; y?: number } | null>(null)
   const [flash, setFlash] = useState<{ page: number; y: number; token: number } | null>(null)
-  // Pages outside the element filter that were opened from the Focused View.
-  const [extraPages, setExtraPages] = useState<number[]>([])
 
   const open = useCallback(async (source: string | ArrayBuffer, name: string) => {
     setLoading(true)
@@ -86,7 +84,6 @@ export default function App() {
       })
       setElement(null)
       setFocused(false)
-      setExtraPages([])
       setCurrentPage(1)
       setPageInput('1')
       viewerRef.current?.scrollTo({ top: 0 })
@@ -168,9 +165,9 @@ export default function App() {
   /** Pages currently shown: every page, or only those mentioning the selected game element. */
   const visiblePages = useMemo(() => {
     if (!loaded) return []
-    if (element) return [...new Set([...elementMatches.map((m) => m.page), ...extraPages])].sort((a, b) => a - b)
+    if (element) return [...new Set(elementMatches.map((m) => m.page))].sort((a, b) => a - b)
     return loaded.sizes.map((_, i) => i + 1)
-  }, [loaded, element, elementMatches, extraPages])
+  }, [loaded, element, elementMatches])
   const visibleSet = useMemo(() => new Set(visiblePages), [visiblePages])
 
   const shownOutline = useMemo(
@@ -211,7 +208,6 @@ export default function App() {
 
   const selectElement = useCallback((el: GameElement | null) => {
     setElement(el)
-    setExtraPages([])
     if (!el) setFocused(false)
   }, [])
 
@@ -266,16 +262,13 @@ export default function App() {
     return group ? [group.id, ...(group.id === focusActive ? [] : [focusActive])] : []
   }, [focusOutline, focusActive])
 
-  /** Leaves the Focused View for the PDF, at `page` (and position `y`, marked briefly). */
-  const openPageFromFocus = useCallback(
-    (page: number, y?: number) => {
-      if (element && !visibleSet.has(page)) setExtraPages((pages) => [...pages, page])
-      pendingPageRef.current = { page, y }
-      setFlash(y != null ? { page, y, token: Date.now() } : null)
-      setFocused(false)
-    },
-    [element, visibleSet],
-  )
+  /** Leaves the Focused View for the full manual, at `page` (and position `y`, marked briefly). */
+  const openPageFromFocus = useCallback((page: number, y?: number) => {
+    pendingPageRef.current = { page, y }
+    setFlash(y != null ? { page, y, token: Date.now() } : null)
+    setElement(null)
+    setFocused(false)
+  }, [])
 
   const scrollToPage = useCallback((page: number) => {
     const el = viewerRef.current?.querySelector<HTMLElement>(`[data-page="${page}"]`)
