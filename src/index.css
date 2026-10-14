@@ -23,15 +23,27 @@
   --violation: #a3261b;
   --radius: 10px;
   --shadow: 0 1px 2px rgb(60 0 0 / 0.06), 0 4px 14px rgb(60 0 0 / 0.06);
+  --font-body: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: 'Teko', 'Arial Narrow', sans-serif;
   color-scheme: light;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 15px;
+  font-family: var(--font-body);
+  font-size: 14px;
   color: var(--text);
 }
 
 /* The presenter view is read from across the room. */
 :root[data-role='presenter'] {
-  font-size: 17px;
+  font-size: 16px;
+}
+
+/* Teko is a tall, condensed display face: used large, for titles and labels. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
 }
 
 * {

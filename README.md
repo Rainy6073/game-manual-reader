@@ -1,4 +1,4 @@
-# Kickoff HQ
+# Kick-Office
 
 A dashboard for running an FRC kickoff. It works on every device, syncs live and needs no logins. When you open it you type your name and pick a view:
 
