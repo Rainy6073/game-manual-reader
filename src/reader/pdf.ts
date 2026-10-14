@@ -15,11 +15,12 @@ export interface OutlineItem {
   children: OutlineItem[]
 }
 
-export function loadPdf(source: string | ArrayBuffer): Promise<PDFDoc> {
+export function loadPdf(source: string | ArrayBuffer, password?: string): Promise<PDFDoc> {
   const params = typeof source === 'string' ? { url: source } : { data: source }
   // Font names (e.g. "Roboto-Bold") are needed to rebuild formatting for the Focused View.
   return pdfjs.getDocument({
     ...params,
+    password,
     fontExtraProperties: true,
     // Decoders and font data, copied into public/ by scripts/copy-pdfjs-assets.mjs.
     wasmUrl: '/pdfjs/wasm/',
@@ -441,5 +442,8 @@ export function findElement(index: PageText[], element: GameElement): SearchMatc
   })
   return matches
 }
+
+/** True when a PDF failed to open because it needs a (different) password. */
+export const isPasswordError = (err: unknown) => err instanceof pdfjs.PasswordException || (err as Error)?.name === 'PasswordException'
 
 export { pdfjs }
