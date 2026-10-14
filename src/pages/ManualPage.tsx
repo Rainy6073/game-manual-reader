@@ -3,13 +3,18 @@ import Composer from '../components/Composer'
 import SubmissionCard from '../components/SubmissionCard'
 import ManualReader, { type ManualRef, type ManualSource } from '../reader/ManualReader'
 import { isPasswordError, loadPdf } from '../reader/pdf'
-import { useIsPresenter, useSession } from '../session'
+import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useDoc, useFileUrl } from '../sync/store'
 import type { SubmissionKind } from '../types'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
 
 type Filter = 'all' | SubmissionKind | 'mine'
+
+const MIN_SIDE = 260
+/** Dragging the panel narrower than this collapses it. */
+const COLLAPSE_AT = 170
+const maxSide = () => Math.max(MIN_SIDE, Math.round(window.innerWidth * 0.7))
 
 /** An encrypted PDF waiting for its passcode before it is uploaded. */
 interface PendingUpload {
@@ -28,6 +33,13 @@ export default function ManualPage() {
   const [filter, setFilter] = useState<Filter>(presenter ? 'all' : 'mine')
   // On narrow screens only one side is shown at a time.
   const [pane, setPane] = useState<'side' | 'manual'>('manual')
+  // On wider screens the side panel is resizable and can collapse to a thin rail.
+  const [sideWidth, setSideWidth] = useLocalState(
+    `kickoff.sideWidth.${presenter ? 'presenter' : 'standard'}`,
+    presenter ? Math.max(380, Math.round(window.innerWidth * 0.34)) : 380,
+  )
+  const [sideCollapsed, setSideCollapsed] = useLocalState('kickoff.sideCollapsed', false)
+  const pageRef = useRef<HTMLDivElement>(null)
   const [uploading, setUploading] = useState(false)
   const [pending, setPending] = useState<PendingUpload | null>(null)
   const [passcode, setPasscode] = useState('')
@@ -47,7 +59,37 @@ export default function ManualPage() {
   const addReference = useCallback((ref: ManualRef) => {
     setReference(ref)
     setPane('side')
-  }, [])
+    setSideCollapsed(false)
+  }, [setSideCollapsed])
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const handle = e.currentTarget
+    handle.setPointerCapture(e.pointerId)
+    const left = pageRef.current?.getBoundingClientRect().left ?? 0
+    document.body.classList.add('resizing')
+    // Collapsing by dragging keeps the width the panel had before, for reopening.
+    const startWidth = sideWidth
+    const move = (ev: PointerEvent) => {
+      const width = ev.clientX - left
+      if (width < COLLAPSE_AT) {
+        setSideCollapsed(true)
+        setSideWidth(startWidth)
+      } else {
+        setSideCollapsed(false)
+        setSideWidth(Math.min(maxSide(), Math.max(MIN_SIDE, Math.round(width))))
+      }
+    }
+    const up = () => {
+      document.body.classList.remove('resizing')
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
 
   // Remember the passcode for everyone once someone has unlocked the shared manual.
   const savePassword = useCallback(
@@ -133,7 +175,7 @@ export default function ManualPage() {
   )
 
   return (
-    <div className={`manual-page show-${pane}`}>
+    <div ref={pageRef} className={`manual-page show-${pane}${sideCollapsed ? ' side-collapsed' : ''}`}>
       <div className="pane-switch" role="tablist">
         <button role="tab" aria-selected={pane === 'side'} onClick={() => setPane('side')}>
           {presenter ? `Submissions (${counts.all})` : 'Ask / Suggest'}
@@ -143,7 +185,20 @@ export default function ManualPage() {
         </button>
       </div>
 
-      <section className="side-panel">
+      <button className="side-rail" onClick={() => setSideCollapsed(false)} title="Show the side panel" aria-label="Show the side panel">
+        <span aria-hidden>»</span>
+        <span className="rail-label">{presenter ? `Submissions · ${counts.all}` : 'Ask / Suggest'}</span>
+      </button>
+
+      <section className="side-panel" style={{ width: Math.min(sideWidth, maxSide()) }}>
+        <button
+          className="icon ghost side-collapse"
+          onClick={() => setSideCollapsed(true)}
+          title="Collapse this panel"
+          aria-label="Collapse the side panel"
+        >
+          «
+        </button>
         <Composer reference={reference} onClearReference={() => setReference(null)} onJump={jumpTo} />
 
         <div className="feed-head">
@@ -183,6 +238,22 @@ export default function ManualPage() {
           ))}
         </div>
       </section>
+
+      <div
+        className="side-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the side panel"
+        aria-valuenow={sideWidth}
+        tabIndex={0}
+        title="Drag to resize · double-click to collapse"
+        onPointerDown={startResize}
+        onDoubleClick={() => setSideCollapsed(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setSideWidth((w) => Math.max(MIN_SIDE, w - 24))
+          else if (e.key === 'ArrowRight') setSideWidth((w) => Math.min(maxSide(), w + 24))
+        }}
+      />
 
       <section className="manual-panel">
         <ManualReader

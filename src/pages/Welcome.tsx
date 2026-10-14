@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Session } from '../session'
+import { loadLastSession, type Session } from '../session'
 import type { Role } from '../types'
 
 const VIEWS: { role: Role; title: string; text: string }[] = [
@@ -16,8 +16,9 @@ const VIEWS: { role: Role; title: string; text: string }[] = [
 ]
 
 export default function Welcome({ onStart }: { onStart: (s: Session) => void }) {
-  const [name, setName] = useState('')
-  const [role, setRole] = useState<Role>('standard')
+  const [last] = useState(loadLastSession)
+  const [name, setName] = useState(last?.name ?? '')
+  const [role, setRole] = useState<Role>(last?.role ?? 'standard')
   const trimmed = name.trim()
 
   return (

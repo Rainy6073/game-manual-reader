@@ -7,23 +7,31 @@ export interface Session {
 }
 
 const KEY = 'kickoff.session'
+/** The last name and view used on this device, to pre-fill the start screen. */
+const LAST_KEY = 'kickoff.lastSession'
 
-function load(): Session | null {
+function load(key = KEY): Session | null {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Session | null
+    const s = JSON.parse(localStorage.getItem(key) ?? 'null') as Session | null
     return s?.name && (s.role === 'presenter' || s.role === 'standard') ? s : null
   } catch {
     return null
   }
 }
 
+export const loadLastSession = () => load(LAST_KEY) ?? load()
+
 /** Who is using this device and which view they picked, remembered per device. */
 export function useStoredSession() {
   const [session, setSession] = useState<Session | null>(load)
   useEffect(() => {
     try {
-      if (session) localStorage.setItem(KEY, JSON.stringify(session))
-      else localStorage.removeItem(KEY)
+      if (session) {
+        localStorage.setItem(KEY, JSON.stringify(session))
+        localStorage.setItem(LAST_KEY, JSON.stringify(session))
+      } else {
+        localStorage.removeItem(KEY)
+      }
     } catch {
       // Storage unavailable; the session lasts until the page is closed.
     }
