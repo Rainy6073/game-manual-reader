@@ -34,7 +34,7 @@ export default function Welcome({ onStart }: { onStart: (s: Session) => void }) 
             K
           </span>
           <div>
-            <h1>Kickoff HQ</h1>
+            <h1>Kick-Office</h1>
             <p className="muted">Game manual, effort/value, archetypes and prototypes, live on every screen.</p>
           </div>
         </div>

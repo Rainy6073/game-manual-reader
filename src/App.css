@@ -24,9 +24,11 @@
   gap: 10px;
   text-decoration: none;
   color: var(--text);
-  font-weight: 800;
-  font-size: 1.1rem;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.9rem;
+  line-height: 1;
+  padding-top: 4px;
 }
 .logo-mark {
   display: grid;
@@ -36,13 +38,16 @@
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
-  font-weight: 900;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.5rem;
+  padding-top: 3px;
 }
 .logo-mark.big {
   width: 52px;
   height: 52px;
   border-radius: 14px;
-  font-size: 1.6rem;
+  font-size: 2.6rem;
 }
 
 .tabs {
@@ -59,7 +64,11 @@
   padding: 0 14px;
   color: var(--muted);
   text-decoration: none;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+  padding-top: 3px;
   border-bottom: 3px solid transparent;
   margin-bottom: -3px;
   white-space: nowrap;
@@ -77,7 +86,8 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  font-size: 0.75rem;
+  font-size: 0.95rem;
+  padding-top: 2px;
   background: var(--surface);
   border: 1px solid var(--border);
 }
@@ -172,7 +182,10 @@ h4 {
   margin: 0;
 }
 h2 {
-  font-size: 1.15rem;
+  font-size: 1.75rem;
+}
+h3 {
+  font-size: 1.45rem;
 }
 h4 {
   font-size: 0.75rem;
@@ -365,8 +378,7 @@ button.ghost:hover:not(:disabled) {
 }
 .welcome-head h1 {
   margin: 0;
-  font-size: 1.8rem;
-  letter-spacing: -0.02em;
+  font-size: 3.2rem;
 }
 .welcome-head p {
   margin: 4px 0 0;
@@ -407,7 +419,10 @@ button.ghost:hover:not(:disabled) {
   pointer-events: none;
 }
 .view-option strong {
-  font-size: 1.05rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.6rem;
+  line-height: 1;
 }
 .view-option.selected {
   border-color: var(--accent);
@@ -758,8 +773,9 @@ span.ability-name {
   fill: #fdf1f1;
 }
 .chart .quad-label {
-  font-size: 12px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   fill: #b3aaaa;
@@ -777,8 +793,9 @@ span.ability-name {
   font-variant-numeric: tabular-nums;
 }
 .chart .axis-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
   fill: var(--text);
 }
 .chart .marker circle {
@@ -798,7 +815,6 @@ span.ability-name {
 }
 .chart .labels {
   position: absolute;
-  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -818,19 +834,22 @@ span.ability-name {
   background: rgb(255 255 255 / 0.94);
   border: 1px solid var(--border);
   border-radius: 6px;
+  height: 20px;
+  line-height: 18px;
+  white-space: nowrap;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
   cursor: default;
+}
+.chart .leader {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.6;
 }
 :root[data-role='presenter'] .chart .label {
   font-size: 13px;
 }
-.chart .labels.open .label {
-  -webkit-line-clamp: unset;
-}
+
 .chart .label.hot {
   border-color: var(--accent);
   color: var(--accent-strong);
@@ -862,13 +881,7 @@ span.ability-name {
   font-variant-numeric: tabular-nums;
   min-width: 70px;
 }
-.chart button.label.more {
-  cursor: pointer;
-  color: var(--accent);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-}
+
 
 /* ---------- Page 3: Archetypes ---------- */
 
@@ -1421,8 +1434,8 @@ span.ability-name {
     display: none;
   }
   .tab {
-    padding: 0 8px;
-    font-size: 0.9rem;
+    padding: 3px 8px 0;
+    font-size: 1.3rem;
   }
   .who-name {
     max-width: 10ch;

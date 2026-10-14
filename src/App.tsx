@@ -34,7 +34,7 @@ export default function App() {
   const page = PAGES.find((p) => p.path === route[0]) ?? PAGES[0]
 
   useEffect(() => {
-    document.title = `${page.label} · Kickoff HQ`
+    document.title = `${page.label} · Kick-Office`
   }, [page])
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export default function App() {
             <span className="logo-mark" aria-hidden>
               K
             </span>
-            <span className="logo-text">Kickoff HQ</span>
+            <span className="logo-text">Kick-Office</span>
           </a>
           <nav className="tabs" aria-label="Pages">
             {PAGES.map((p, i) => (

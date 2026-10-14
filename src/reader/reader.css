@@ -25,6 +25,10 @@
 }
 .brand strong {
   color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1;
 }
 .doc-name {
   font-size: 12px;
@@ -121,7 +125,7 @@ button.icon {
   position: sticky;
   top: 0;
   z-index: 1;
-  font-size: 13px;
+  font-size: 18px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
