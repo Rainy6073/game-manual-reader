@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import ArchetypesPage from './pages/ArchetypesPage'
 import EffortValuePage from './pages/EffortValuePage'
 import ManualPage from './pages/ManualPage'
+import NwhPage from './pages/NwhPage'
 import PrototypesPage from './pages/PrototypesPage'
 import ToolsPage from './pages/ToolsPage'
 import Welcome from './pages/Welcome'
@@ -14,6 +15,7 @@ const PAGES = [
   { path: 'manual', label: 'Game Manual', short: 'Manual' },
   { path: 'effort-value', label: 'Effort / Value', short: 'E/V' },
   { path: 'archetypes', label: 'Archetypes', short: 'Archetypes' },
+  { path: 'nwh', label: 'NWH', short: 'NWH', title: 'Needs, Wants & Nice to Haves' },
   { path: 'prototypes', label: 'Prototypes', short: 'Prototypes' },
   { path: 'tools', label: 'Tools', short: 'Tools' },
 ] as const
@@ -71,15 +73,21 @@ export default function App() {
           </button>
         ) : (
           <header className="topbar">
-            <a className="logo" href="#/manual">
+            <button className="logo" onClick={() => setSession(null)} title="Back to the start screen">
               <span className="logo-mark" aria-hidden>
                 K
               </span>
               <span className="logo-text">Kick-Office</span>
-            </a>
+            </button>
             <nav className="tabs" aria-label="Pages">
               {PAGES.map((p, i) => (
-                <a key={p.path} href={`#/${p.path}`} className="tab" aria-current={p === page ? 'page' : undefined}>
+                <a
+                  key={p.path}
+                  href={`#/${p.path}`}
+                  className="tab"
+                  aria-current={p === page ? 'page' : undefined}
+                  title={'title' in p ? p.title : undefined}
+                >
                   <span className="tab-num">{i + 1}</span>
                   <span className="tab-label">{p.label}</span>
                   <span className="tab-short">{p.short}</span>
@@ -112,6 +120,7 @@ export default function App() {
           {page.path === 'manual' && <ManualPage />}
           {page.path === 'effort-value' && <EffortValuePage />}
           {page.path === 'archetypes' && <ArchetypesPage />}
+          {page.path === 'nwh' && <NwhPage />}
           {page.path === 'prototypes' && <PrototypesPage openId={route[1]} />}
           {page.path === 'tools' && <ToolsPage toolId={route[1]} />}
         </main>

@@ -22,14 +22,20 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
   text-decoration: none;
   color: var(--text);
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 1.9rem;
   line-height: 1;
-  padding-top: 4px;
+  padding: 4px 4px 0 0;
   white-space: nowrap;
+}
+.logo:hover .logo-text {
+  color: var(--accent);
 }
 .logo-mark {
   display: grid;
@@ -1344,6 +1350,33 @@ span.ability-name {
   color: var(--accent);
 }
 
+/* ---------- Needs, Wants & Nice to Haves ---------- */
+
+.nwh-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nwh-columns .nwh-column {
+  flex: 1 1 0;
+  min-width: 240px;
+  width: auto;
+}
+.nwh-column.tier-wants {
+  border-top-color: #e3a008;
+}
+.nwh-column.tier-nice {
+  border-top-color: var(--idea);
+}
+.nwh-column .column-head h3 {
+  font-size: 1.6rem;
+  padding-top: 3px;
+}
+.palette h3 .count-pill {
+  margin-left: 6px;
+}
+
 /* ---------- Page 4: Prototypes ---------- */
 
 .proto-page {
@@ -1935,34 +1968,34 @@ thead .team-col.team-gray {
 .team-head input:hover {
   border-color: var(--border);
 }
+.calc-table {
+  --counter-w: 96px;
+}
 .period-heads,
 .counts {
-  display: flex;
+  display: grid;
   justify-content: center;
   gap: 8px;
 }
 .period-heads span {
-  flex: 1;
+  text-align: center;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--muted);
 }
-.no-count {
-  flex: 1;
-}
 .counter {
-  flex: 1;
-  display: inline-flex;
+  display: flex;
   align-items: stretch;
-  justify-content: center;
+  width: var(--counter-w);
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg);
-  max-width: 96px;
 }
 .counter input {
+  flex: 1;
+  min-width: 0;
   width: 38px;
   border: none;
   border-radius: 0;
@@ -1983,9 +2016,10 @@ thead .team-col.team-gray {
   border-color: var(--accent);
 }
 .counter button {
+  flex: 0 0 28px;
   border: none;
   border-radius: 0;
-  padding: 0 7px;
+  padding: 0;
   background: var(--surface);
   color: var(--muted);
 }
@@ -2131,7 +2165,7 @@ button.danger-fill {
 
 /* ---------- Narrow screens ---------- */
 
-@media (max-width: 1100px) {
+@media (max-width: 1320px) {
   .tab-label {
     display: none;
   }

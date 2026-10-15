@@ -104,12 +104,23 @@ export interface FieldBoard {
   robotSize: number
 }
 
+export type PriorityTier = 'needs' | 'wants' | 'nice'
+
+/** Abilities sorted into Needs / Wants / Nice to Haves; each ability is in at most one tier. */
+export interface Priorities {
+  id: string
+  needs: string[]
+  wants: string[]
+  nice: string[]
+}
+
 export interface Collections {
   submissions: Submission
   abilities: Ability
   archetypes: Archetype
   responses: PrototypeResponse
   meta: ManualMeta
+  priorities: Priorities
 }
 
 export type CollectionName = keyof Collections

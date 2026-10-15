@@ -169,6 +169,8 @@ export default function ScoreCalculator() {
   }
 
   const groups = [...new Set(model.rows.map((r) => r.group))]
+  // Every team cell lays its period inputs on the same fixed grid, so columns line up.
+  const periodGrid = { gridTemplateColumns: `repeat(${model.periods.length}, var(--counter-w))` }
   const patchModel = (fields: Partial<ScoringModel>) => setModel({ ...model, ...fields })
   const patchRow = (id: string, fields: Partial<ScoreRow>) => patchModel({ rows: model.rows.map((r) => (r.id === id ? { ...r, ...fields } : r)) })
   const patchRule = (id: string, fields: Partial<RpRule>) => patchModel({ bonusRps: model.bonusRps.map((r) => (r.id === id ? { ...r, ...fields } : r)) })
@@ -221,7 +223,7 @@ export default function ScoreCalculator() {
                       </button>
                     )}
                   </div>
-                  <div className="period-heads">
+                  <div className="period-heads" style={periodGrid}>
                     {model.periods.map((p) => (
                       <span key={p}>{p}</span>
                     ))}
@@ -271,7 +273,7 @@ export default function ScoreCalculator() {
                       </td>
                       {teams.map((t) => (
                         <td key={t.id} className={`team-col team-${t.color}`}>
-                          <div className="counts">
+                          <div className="counts" style={periodGrid}>
                             {model.periods.map((p) =>
                               row.values[p] == null ? (
                                 <span key={p} className="no-count" />
