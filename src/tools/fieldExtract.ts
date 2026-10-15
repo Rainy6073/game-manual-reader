@@ -139,6 +139,9 @@ export async function renderRegion(doc: PDFDoc, pageNumber: number, box: Box | n
     canvas,
     viewport,
     transform: [1, 0, 0, 1, -region.x * scale, -region.y * scale],
+    // The "print" intent renders without waiting for animation frames, so this
+    // still finishes while the tab is in the background.
+    intent: 'print',
   }).promise
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Render failed'))), 'image/png'))
 }
@@ -151,6 +154,6 @@ export async function renderThumb(doc: PDFDoc, pageNumber: number, width = 360):
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(viewport.width)
   canvas.height = Math.round(viewport.height)
-  await page.render({ canvas, viewport }).promise
+  await page.render({ canvas, viewport, intent: 'print' }).promise
   return canvas.toDataURL('image/jpeg', 0.8)
 }

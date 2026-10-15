@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { useIsPresenter, useLocalState } from '../session'
-import { put, useDoc, useFileUrl } from '../sync/store'
-import { newId, type Alliance, type BoardRobot, type BoardStroke, type FieldBoard as Board } from '../types'
-import FieldPicker from './FieldPicker'
+import { loadPdf } from '../reader/pdf'
+import { useLocalState } from '../session'
+import { resolveFileUrl, useDoc } from '../sync/store'
+import { newId, type Alliance, type BoardRobot, type BoardStroke, type FieldBoard as Board, type FieldImage } from '../types'
+import { findFieldCandidates, renderRegion } from './fieldExtract'
+import FieldPicker, { type PickedField } from './FieldPicker'
+import { saveLocalFile, useLocalFileUrl } from './localFiles'
 
 type Tool = 'move' | 'pen' | 'line' | 'erase'
 
@@ -24,7 +27,7 @@ const ALLIANCE_FILL: Record<Alliance, string> = { red: '#d0101b', blue: '#1d6fa8
 const VW = 1000
 const UNDO_LIMIT = 50
 
-const emptyBoard = (id: string): Board => ({ id, robots: [], strokes: [], robotSize: 0.055 })
+const emptyBoard = (): Board => ({ robots: [], strokes: [], robotSize: 0.055 })
 
 /** Distance from point p to segment ab. */
 function segDist(p: [number, number], a: [number, number], b: [number, number]) {
@@ -35,16 +38,16 @@ function segDist(p: [number, number], a: [number, number], b: [number, number]) 
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
 }
 
+/**
+ * A whiteboard over the field. Everything here belongs to this device only: each
+ * screen has its own field image, robots and drawings.
+ */
 export default function FieldBoard() {
-  const presenter = useIsPresenter()
-  const field = useDoc('field', 'current')
-  const fieldUrl = useFileUrl(field?.url)
-  const master = useDoc('boards', 'master')
-  const [mine, setMine] = useLocalState<Board>('kickoff.myFieldBoard', emptyBoard('mine'))
-  const [view, setView] = useLocalState<'master' | 'mine'>('kickoff.fieldView', 'master')
-  const showingMine = !presenter && view === 'mine'
-  const editable = presenter || showingMine
-  const stored = showingMine ? mine : (master ?? emptyBoard('master'))
+  const manual = useDoc('meta', 'manual')
+  const [field, setField] = useLocalState<FieldImage | null>('kickoff.fieldImage', null)
+  const fieldUrl = useLocalFileUrl(field?.key)
+  const [stored, setStored] = useLocalState<Board>('kickoff.fieldBoard', emptyBoard())
+  const [finding, setFinding] = useState(false)
 
   const [tool, setTool] = useState<Tool>('pen')
   const [color, setColor] = useState(COLORS[2].value)
@@ -67,14 +70,14 @@ export default function FieldBoard() {
   }
   const historyRef = useRef<Board[]>([])
   const svgRef = useRef<SVGSVGElement>(null)
-  const gesture = useRef<{ kind: 'robot'; id: string; dx: number; dy: number; lastSent: number } | { kind: 'draw' } | { kind: 'erase' } | null>(null)
+  const gesture = useRef<{ kind: 'robot'; id: string; dx: number; dy: number } | { kind: 'draw' } | { kind: 'erase' } | null>(null)
 
   const board = draft ?? stored
   const aspect = field ? field.height / field.width : 0.5
   const VH = VW * aspect
   const robotPx = board.robotSize * VW
 
-  const save = (b: Board) => (showingMine ? setMine(b) : put('boards', b))
+  const save = setStored
   /** Saves a change that can be undone. */
   const commit = (b: Board) => {
     historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
@@ -85,14 +88,40 @@ export default function FieldBoard() {
     if (prev) save(prev)
   }
 
-  // Undo history belongs to one board.
+  const applyField = async (picked: PickedField) => {
+    const key = `field-${newId()}`
+    await saveLocalFile(key, picked.blob)
+    setField({ key, width: picked.width, height: picked.height, source: picked.source })
+  }
+
+  // The first time, find the field in the shared manual automatically.
   useEffect(() => {
-    historyRef.current = []
-  }, [showingMine])
+    if (field || !manual) return
+    let cancelled = false
+    setFinding(true)
+    ;(async () => {
+      try {
+        const doc = await loadPdf(await resolveFileUrl(manual.url), manual.password)
+        const [best] = await findFieldCandidates(doc, 3)
+        if (!best || cancelled) return
+        const blob = await renderRegion(doc, best.page, best.box)
+        const bitmap = await createImageBitmap(blob)
+        if (!cancelled) await applyField({ blob, width: bitmap.width, height: bitmap.height, source: `${manual.name}, page ${best.page}` })
+      } catch (err) {
+        console.warn('Could not find the field automatically', err)
+      } finally {
+        if (!cancelled) setFinding(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field, manual?.url])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && editable && !(e.target instanceof HTMLInputElement)) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !(e.target instanceof HTMLInputElement)) {
         e.preventDefault()
         undo()
       }
@@ -131,7 +160,7 @@ export default function FieldBoard() {
   }
 
   const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!editable || !field || e.button !== 0) return
+    if (!field || e.button !== 0) return
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -142,7 +171,7 @@ export default function FieldBoard() {
       const robot = robotAt(p)
       if (!robot) return
       const [cx, cy] = px([robot.x, robot.y])
-      gesture.current = { kind: 'robot', id: robot.id, dx: p[0] - cx, dy: p[1] - cy, lastSent: 0 }
+      gesture.current = { kind: 'robot', id: robot.id, dx: p[0] - cx, dy: p[1] - cy }
       historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
       setDraft(stored)
     } else if (tool === 'erase') {
@@ -163,11 +192,6 @@ export default function FieldBoard() {
       const current = draftRef.current ?? stored
       const next = { ...current, robots: current.robots.map((r) => (r.id === g.id ? { ...r, ...xy(norm([p[0] - g.dx, p[1] - g.dy])) } : r)) }
       setDraft(next)
-      // Keep other screens roughly in step while dragging.
-      if (e.timeStamp - g.lastSent > 120) {
-        g.lastSent = e.timeStamp
-        save(next)
-      }
     } else if (g.kind === 'erase') {
       setDraft(eraseAt(p, draftRef.current ?? stored))
     } else if (pendingRef.current) {
@@ -213,36 +237,19 @@ export default function FieldBoard() {
   }
 
   const rename = (e: React.MouseEvent) => {
-    if (!editable) return
     const robot = robotAt(toSvg(e))
     if (!robot) return
     const label = prompt('Robot label (e.g. team number)', robot.label)?.trim()
     if (label) commit({ ...stored, robots: stored.robots.map((r) => (r.id === robot.id ? { ...r, label: label.slice(0, 8) } : r)) })
   }
 
-  const copyMaster = () => {
-    if ((mine.strokes.length || mine.robots.length) && !confirm('Replace your board with a copy of the master board?')) return
-    setMine({ ...(master ?? emptyBoard('mine')), id: 'mine' })
-  }
 
   const strokes = pending ? [...board.strokes, pending] : board.strokes
 
   return (
     <div className="field-board">
       <div className="fb-toolbar">
-        {!presenter && (
-          <div className="segmented" role="radiogroup" aria-label="Board">
-            <button role="radio" aria-checked={view === 'master'} onClick={() => setView('master')}>
-              Master board
-            </button>
-            <button role="radio" aria-checked={view === 'mine'} onClick={() => setView('mine')}>
-              My board
-            </button>
-          </div>
-        )}
-        {showingMine && <button onClick={copyMaster}>Copy master</button>}
-
-        {editable && field && (
+        {field && (
           <>
             <div className="segmented" role="radiogroup" aria-label="Tool">
               {(
@@ -324,19 +331,21 @@ export default function FieldBoard() {
         )}
         <span style={{ flex: 1 }} />
         {field && <span className="muted small fb-source">Field: {field.source}</span>}
-        {presenter && <button onClick={() => setPicking(true)}>{field ? 'Change field' : 'Choose field'}</button>}
+        <button onClick={() => setPicking(true)}>{field ? 'Change field' : 'Choose field'}</button>
       </div>
 
       <div className="fb-stage">
         {!field ? (
           <div className="empty-manual">
-            <h3>{presenter ? 'Set up the field' : 'Waiting for the field'}</h3>
+            <h3>{finding ? 'Finding the field in the manual…' : 'Set up the field'}</h3>
             <p className="muted">
-              {presenter
-                ? 'Kick-Office finds the top-down field drawing in the game manual. You can adjust the crop, pick another page, or upload your own image or PDF.'
-                : 'The presenter hasn’t chosen the field yet. It will appear here automatically.'}
+              {finding
+                ? 'This takes a few seconds.'
+                : manual
+                  ? 'Pick the top-down field drawing from the game manual, or upload your own image or PDF.'
+                  : 'Once the game manual is shared, the field is found automatically. You can also upload a field image or PDF.'}
             </p>
-            {presenter && (
+            {!finding && (
               <button className="primary" onClick={() => setPicking(true)}>
                 Choose field
               </button>
@@ -345,7 +354,7 @@ export default function FieldBoard() {
         ) : (
           <svg
             ref={svgRef}
-            className={`fb-svg tool-${editable ? tool : 'view'}`}
+            className={`fb-svg tool-${tool}`}
             viewBox={`0 0 ${VW} ${VH}`}
             preserveAspectRatio="xMidYMid meet"
             onPointerDown={onDown}
@@ -381,7 +390,7 @@ export default function FieldBoard() {
           </svg>
         )}
       </div>
-      {editable && field && (
+      {field && (
         <p className="muted small fb-hint">
           {tool === 'move' && 'Drag robots to move them. Double-click a robot to rename it (e.g. a team number).'}
           {tool === 'pen' && 'Draw paths freehand.'}
@@ -390,7 +399,7 @@ export default function FieldBoard() {
         </p>
       )}
 
-      {picking && <FieldPicker onClose={() => setPicking(false)} />}
+      {picking && <FieldPicker onClose={() => setPicking(false)} onPick={applyField} />}
     </div>
   )
 }

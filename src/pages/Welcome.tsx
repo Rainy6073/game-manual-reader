@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ResetData from '../components/ResetData'
 import { loadLastSession, type Session } from '../session'
 import type { Role } from '../types'
 
@@ -61,6 +62,7 @@ export default function Welcome({ onStart }: { onStart: (s: Session) => void }) 
           Start kickoff
         </button>
       </form>
+      <ResetData />
     </div>
   )
 }

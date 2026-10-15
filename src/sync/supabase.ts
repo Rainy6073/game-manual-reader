@@ -71,6 +71,24 @@ export function createSupabaseBackend(url: string, key: string): Backend {
       return client.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
     },
 
+    async clearAll() {
+      const { error } = await client.from(TABLE).delete().not('id', 'is', null)
+      if (error) throw error
+      // Uploaded files live in one folder per upload. Removing them needs the
+      // storage delete policy from schema.sql; without it they are just left behind.
+      try {
+        const bucket = client.storage.from(BUCKET)
+        const { data: folders } = await bucket.list('', { limit: 1000 })
+        for (const folder of folders ?? []) {
+          const { data: files } = await bucket.list(folder.name, { limit: 1000 })
+          const paths = (files ?? []).map((f) => `${folder.name}/${f.name}`)
+          if (paths.length) await bucket.remove(paths)
+        }
+      } catch (err) {
+        console.warn('Could not remove uploaded files', err)
+      }
+    },
+
     async resolveUrl(url) {
       return url
     },

@@ -5,6 +5,7 @@ import ManualPage from './pages/ManualPage'
 import PrototypesPage from './pages/PrototypesPage'
 import ToolsPage from './pages/ToolsPage'
 import Welcome from './pages/Welcome'
+import UpdatePrompt from './components/UpdatePrompt'
 import { SessionContext, useLocalState, useStoredSession } from './session'
 import { syncMode, useSyncStatus } from './sync/store'
 import './App.css'
@@ -44,7 +45,13 @@ export default function App() {
     document.documentElement.dataset.role = session?.role ?? ''
   }, [session?.role])
 
-  if (!session) return <Welcome onStart={setSession} />
+  if (!session)
+    return (
+      <>
+        <Welcome onStart={setSession} />
+        <UpdatePrompt />
+      </>
+    )
 
   const statusLabel = {
     live: 'Live',
@@ -109,6 +116,7 @@ export default function App() {
           {page.path === 'tools' && <ToolsPage toolId={route[1]} />}
         </main>
       </div>
+      <UpdatePrompt />
     </SessionContext.Provider>
   )
 }

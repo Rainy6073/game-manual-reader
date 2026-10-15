@@ -37,7 +37,11 @@ on conflict (id) do nothing;
 
 drop policy if exists "kickoff upload" on storage.objects;
 drop policy if exists "kickoff read files" on storage.objects;
+drop policy if exists "kickoff delete files" on storage.objects;
 create policy "kickoff upload" on storage.objects for insert with check (bucket_id = 'kickoff');
 create policy "kickoff read files" on storage.objects for select using (bucket_id = 'kickoff');
+-- Lets "Reset all data" (start screen, access code required) remove uploaded files too.
+create policy "kickoff delete files" on storage.objects for delete using (bucket_id = 'kickoff');
 
--- To start fresh next season:  delete from public.kickoff_docs;
+-- To start fresh next season, use "Reset data" on the start screen, or run:
+--   delete from public.kickoff_docs;

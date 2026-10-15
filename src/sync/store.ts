@@ -28,6 +28,8 @@ export interface Backend {
   upload(file: Blob, name: string): Promise<string>
   /** Turns a stored URL into one the browser can load. */
   resolveUrl(url: string): Promise<string>
+  /** Deletes every shared record (and, where allowed, uploaded file). */
+  clearAll(): Promise<void>
 }
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -131,6 +133,23 @@ export function patch<C extends CollectionName>(collection: C, id: string, field
 export function remove(collection: CollectionName, id: string) {
   apply([{ collection, id, data: null }])
   backend.remove(collection, id).catch(report)
+}
+
+/**
+ * Deletes all shared data for everyone, plus this device's own boards and
+ * settings (the remembered name is kept).
+ */
+export async function resetAllData() {
+  await backend.clearAll()
+  apply([], true)
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('kickoff.') && key !== 'kickoff.lastSession') localStorage.removeItem(key)
+    }
+    indexedDB.deleteDatabase('kickoff-tool-files')
+  } catch {
+    // Storage unavailable.
+  }
 }
 
 export const uploadFile = (file: Blob, name: string) => backend.upload(file, name)

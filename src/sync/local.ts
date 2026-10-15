@@ -66,7 +66,9 @@ export function createLocalBackend(): Backend {
 
     subscribe(onChange, onStatus) {
       onStatus('local', false)
-      const listener = (e: MessageEvent<Change>) => onChange(e.data)
+      // Another tab reset everything: reload from (now empty) storage.
+      const listener = (e: MessageEvent<Change | { reset: true }>) =>
+        'reset' in e.data ? onStatus('local', true) : onChange(e.data)
       channel?.addEventListener('message', listener)
       return () => channel?.removeEventListener('message', listener)
     },
@@ -83,6 +85,12 @@ export function createLocalBackend(): Backend {
       const key = crypto.randomUUID()
       await fileStore('readwrite', (s) => s.put(file, key))
       return FILE_PREFIX + key
+    },
+
+    async clearAll() {
+      write({})
+      await fileStore('readwrite', (s) => s.clear())
+      channel?.postMessage({ reset: true })
     },
 
     async resolveUrl(url) {

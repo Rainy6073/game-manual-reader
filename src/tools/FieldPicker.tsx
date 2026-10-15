@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isPasswordError, loadPdf, type PDFDoc } from '../reader/pdf'
-import { useSession } from '../session'
-import { put, resolveFileUrl, uploadFile, useDoc } from '../sync/store'
+import { resolveFileUrl, useDoc } from '../sync/store'
 import { findFieldCandidates, renderRegion, renderThumb, type Box, type FieldCandidate } from './fieldExtract'
 
 const EDIT_WIDTH = 760
@@ -11,9 +10,20 @@ interface Source {
   name: string
 }
 
+export interface PickedField {
+  blob: Blob
+  width: number
+  height: number
+  source: string
+}
+
+interface Props {
+  onClose: () => void
+  onPick: (field: PickedField) => void
+}
+
 /** Chooses the field image: found in the shared manual, or uploaded (image or PDF). */
-export default function FieldPicker({ onClose }: { onClose: () => void }) {
-  const { name } = useSession()
+export default function FieldPicker({ onClose, onPick }: Props) {
   const manual = useDoc('meta', 'manual')
   const [source, setSource] = useState<Source | null>(null)
   const [candidates, setCandidates] = useState<FieldCandidate[] | null>(null)
@@ -71,11 +81,10 @@ export default function FieldPicker({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manual?.url])
 
-  /** Saves an image as the shared field. */
+  /** Uses an image as this device's field. */
   const saveImage = async (blob: Blob, label: string) => {
     const bitmap = await createImageBitmap(blob)
-    const url = await uploadFile(blob, 'field.png')
-    put('field', { id: 'current', url, width: bitmap.width, height: bitmap.height, source: label, setBy: name, setAt: Date.now() })
+    onPick({ blob, width: bitmap.width, height: bitmap.height, source: label })
     onClose()
   }
 

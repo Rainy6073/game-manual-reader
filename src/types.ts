@@ -65,16 +65,14 @@ export interface ManualMeta {
   uploadedAt: number
 }
 
-/** The top-down field image used by the Field Board. */
+/** The top-down field image used by this device's Field Board. */
 export interface FieldImage {
-  id: 'current'
-  url: string
+  /** Where the image is kept on this device (see tools/localFiles.ts). */
+  key: string
   width: number
   height: number
   /** Where it came from, e.g. "2026 manual, page 18". */
   source: string
-  setBy: string
-  setAt: number
 }
 
 export type Alliance = 'red' | 'blue' | 'neutral'
@@ -100,7 +98,6 @@ export interface BoardStroke {
 }
 
 export interface FieldBoard {
-  id: string
   robots: BoardRobot[]
   strokes: BoardStroke[]
   /** Robot size as a fraction of the image width. */
@@ -113,8 +110,6 @@ export interface Collections {
   archetypes: Archetype
   responses: PrototypeResponse
   meta: ManualMeta
-  field: FieldImage
-  boards: FieldBoard
 }
 
 export type CollectionName = keyof Collections
