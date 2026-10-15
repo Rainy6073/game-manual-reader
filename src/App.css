@@ -69,7 +69,6 @@
   font-weight: 500;
   font-size: 1.35rem;
   letter-spacing: 0.02em;
-  padding-top: 3px;
   border-bottom: 3px solid transparent;
   margin-bottom: -3px;
   white-space: nowrap;
@@ -87,8 +86,10 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  font-size: 0.95rem;
-  padding-top: 2px;
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
   background: var(--surface);
   border: 1px solid var(--border);
 }
@@ -99,6 +100,11 @@
 }
 .tab-short {
   display: none;
+}
+/* Teko sits low in its line box; nudge it up so it lines up with the number. */
+.tab-label,
+.tab-short {
+  padding-top: 3px;
 }
 
 .who {
@@ -489,11 +495,15 @@ button.ghost:hover:not(:disabled) {
   min-height: 0;
   position: relative;
 }
-.side-collapse {
+.side-tools {
   position: absolute;
   top: 12px;
   right: 10px;
   z-index: 1;
+  display: flex;
+  gap: 2px;
+}
+.side-tools button {
   font-size: 1.1rem;
   padding: 2px 9px;
 }
@@ -563,6 +573,158 @@ body.resizing .manual-panel {
   letter-spacing: 0.05em;
   color: var(--text);
 }
+.manual-rail {
+  display: none;
+  flex: 0 0 34px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 1.1rem;
+}
+.manual-rail:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+/* Question Board: the side panel takes the whole page. */
+.manual-page.board-open .side-panel {
+  flex: 1;
+  min-width: 0;
+}
+.manual-page.board-open .manual-rail {
+  display: flex;
+}
+.manual-page.board-open .manual-panel,
+.manual-page.board-open .side-rail {
+  display: none;
+}
+
+.board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  padding: 14px 16px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.board-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.board-title h2 {
+  font-size: 2.2rem;
+}
+.board-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.board-search {
+  width: 240px;
+}
+.board-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-select select {
+  padding: 6px 8px;
+}
+.board-compose {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.board-compose summary {
+  cursor: pointer;
+  padding: 10px 16px;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+}
+.board-compose summary::-webkit-details-marker {
+  display: none;
+}
+.board-compose[open] summary {
+  padding-bottom: 0;
+}
+.board-compose .composer {
+  border-bottom: none;
+  max-width: 760px;
+}
+.board-columns {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  align-items: stretch;
+}
+.board-column {
+  flex: 0 0 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--accent);
+  border-radius: 12px;
+  background: var(--bg);
+}
+/* With only a few groups, columns share the width and lay cards out in a grid. */
+.board-columns.wide .board-column {
+  flex: 1 1 0;
+  min-width: 300px;
+}
+.board-column.group-type.key-idea {
+  border-top-color: var(--idea);
+}
+.board-column > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+.board-column h3 {
+  font-size: 1.7rem;
+  padding-top: 3px;
+}
+.count-pill {
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.board-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-content: start;
+  gap: 10px;
+}
+.board-cards .empty {
+  grid-column: 1 / -1;
+}
+
 .manual-page.side-collapsed .side-rail {
   display: flex;
 }
@@ -1446,7 +1608,8 @@ span.ability-name {
     flex: 1;
   }
   .manual-page .side-resize,
-  .manual-page .side-collapse,
+  .manual-page .side-tools,
+  .manual-page .manual-rail,
   .manual-page.side-collapsed .side-rail {
     display: none;
   }

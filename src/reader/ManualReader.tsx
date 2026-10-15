@@ -152,12 +152,22 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     }
   }
 
-  // Fit the page width to the viewer once a document loads.
+  // Fit the page width to the viewer once a document loads. If the viewer is
+  // hidden at that moment (e.g. behind the Question Board), fit when it appears.
   useEffect(() => {
-    if (!loaded || !viewerRef.current) return
-    const available = viewerRef.current.clientWidth - 48
-    const widest = Math.max(...loaded.sizes.map((s) => s.width))
-    setScale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
+    const viewer = viewerRef.current
+    if (!loaded || !viewer) return
+    const fit = () => {
+      const available = viewer.clientWidth - 48
+      if (available <= 0) return false
+      const widest = Math.max(...loaded.sizes.map((s) => s.width))
+      setScale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
+      return true
+    }
+    if (fit()) return
+    const observer = new ResizeObserver(() => fit() && observer.disconnect())
+    observer.observe(viewer)
+    return () => observer.disconnect()
   }, [loaded])
 
   // --- Text index & game elements -----------------------------------------

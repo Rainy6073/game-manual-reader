@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Composer from '../components/Composer'
+import QuestionBoard from '../components/QuestionBoard'
 import SubmissionCard from '../components/SubmissionCard'
 import ManualReader, { type ManualRef, type ManualSource } from '../reader/ManualReader'
 import { isPasswordError, loadPdf } from '../reader/pdf'
@@ -14,7 +15,22 @@ type Filter = 'all' | SubmissionKind | 'mine'
 const MIN_SIDE = 260
 /** Dragging the panel narrower than this collapses it. */
 const COLLAPSE_AT = 170
+/** Dragging the divider this close to the right edge opens the Question Board. */
+const BOARD_AT = 140
 const maxSide = () => Math.max(MIN_SIDE, Math.round(window.innerWidth * 0.7))
+
+const WIDE = '(min-width: 901px)'
+/** True on screens wide enough for side-by-side panels. */
+function useWide() {
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE)
+    const onChange = () => setWide(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return wide
+}
 
 /** An encrypted PDF waiting for its passcode before it is uploaded. */
 interface PendingUpload {
@@ -39,6 +55,10 @@ export default function ManualPage() {
     presenter ? Math.max(380, Math.round(window.innerWidth * 0.34)) : 380,
   )
   const [sideCollapsed, setSideCollapsed] = useLocalState('kickoff.sideCollapsed', false)
+  // Dragging the divider all the way right swaps the manual for the Question Board.
+  const [boardOpen, setBoardOpen] = useLocalState('kickoff.questionBoard', false)
+  const wide = useWide()
+  const board = boardOpen && wide
   const pageRef = useRef<HTMLDivElement>(null)
   const [uploading, setUploading] = useState(false)
   const [pending, setPending] = useState<PendingUpload | null>(null)
@@ -54,7 +74,8 @@ export default function ManualPage() {
   const jumpTo = useCallback((ref: ManualRef) => {
     setJump({ ...ref, token: Date.now() })
     setPane('manual')
-  }, [])
+    setBoardOpen(false)
+  }, [setBoardOpen])
 
   const addReference = useCallback((ref: ManualRef) => {
     setReference(ref)
@@ -66,7 +87,7 @@ export default function ManualPage() {
     e.preventDefault()
     const handle = e.currentTarget
     handle.setPointerCapture(e.pointerId)
-    const left = pageRef.current?.getBoundingClientRect().left ?? 0
+    const { left, right } = pageRef.current!.getBoundingClientRect()
     document.body.classList.add('resizing')
     // Collapsing by dragging keeps the width the panel had before, for reopening.
     const startWidth = sideWidth
@@ -74,9 +95,15 @@ export default function ManualPage() {
       const width = ev.clientX - left
       if (width < COLLAPSE_AT) {
         setSideCollapsed(true)
+        setBoardOpen(false)
+        setSideWidth(startWidth)
+      } else if (ev.clientX > right - BOARD_AT) {
+        setSideCollapsed(false)
+        setBoardOpen(true)
         setSideWidth(startWidth)
       } else {
         setSideCollapsed(false)
+        setBoardOpen(false)
         setSideWidth(Math.min(maxSide(), Math.max(MIN_SIDE, Math.round(width))))
       }
     }
@@ -175,7 +202,10 @@ export default function ManualPage() {
   )
 
   return (
-    <div ref={pageRef} className={`manual-page show-${pane}${sideCollapsed ? ' side-collapsed' : ''}`}>
+    <div
+      ref={pageRef}
+      className={`manual-page show-${pane}${sideCollapsed && !board ? ' side-collapsed' : ''}${board ? ' board-open' : ''}`}
+    >
       <div className="pane-switch" role="tablist">
         <button role="tab" aria-selected={pane === 'side'} onClick={() => setPane('side')}>
           {presenter ? `Submissions (${counts.all})` : 'Ask / Suggest'}
@@ -190,53 +220,75 @@ export default function ManualPage() {
         <span className="rail-label">{presenter ? `Submissions · ${counts.all}` : 'Ask / Suggest'}</span>
       </button>
 
-      <section className="side-panel" style={{ width: Math.min(sideWidth, maxSide()) }}>
-        <button
-          className="icon ghost side-collapse"
-          onClick={() => setSideCollapsed(true)}
-          title="Collapse this panel"
-          aria-label="Collapse the side panel"
-        >
-          «
-        </button>
-        <Composer reference={reference} onClearReference={() => setReference(null)} onJump={jumpTo} />
-
-        <div className="feed-head">
-          <h2>{presenter ? 'Submitted by the team' : 'Submissions'}</h2>
-          <div className="filter-chips">
-            {filters.map((f) => (
-              <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-                {f.label} <span className="count">{counts[f.id]}</span>
+      <section className="side-panel" style={board ? undefined : { width: Math.min(sideWidth, maxSide()) }}>
+        {board ? (
+          <QuestionBoard
+            submissions={submissions}
+            reference={reference}
+            onClearReference={() => setReference(null)}
+            onJump={jumpTo}
+            onClose={() => setBoardOpen(false)}
+          />
+        ) : (
+          <>
+            <div className="side-tools">
+              <button
+                className="icon ghost"
+                onClick={() => setBoardOpen(true)}
+                title="Open the Question Board (or drag the divider all the way right)"
+                aria-label="Open the Question Board"
+              >
+                ⤢
               </button>
-            ))}
-          </div>
-        </div>
-        <div className="feed">
-          {shown.length === 0 && (
-            <p className="empty muted">
-              {filter === 'mine' ? 'Nothing sent yet. Your questions and ideas will show up here.' : 'No submissions yet.'}
-            </p>
-          )}
-          {shown.map((s) => (
-            <SubmissionCard
-              key={s.id}
-              submission={s}
-              onJump={jumpTo}
-              actions={
-                (presenter || s.author === name) && (
-                  <button
-                    className="link danger"
-                    onClick={() => {
-                      if (confirm('Delete this submission?')) remove('submissions', s.id)
-                    }}
-                  >
-                    Delete
+              <button
+                className="icon ghost"
+                onClick={() => setSideCollapsed(true)}
+                title="Collapse this panel"
+                aria-label="Collapse the side panel"
+              >
+                «
+              </button>
+            </div>
+            <Composer reference={reference} onClearReference={() => setReference(null)} onJump={jumpTo} />
+
+            <div className="feed-head">
+              <h2>{presenter ? 'Submitted by the team' : 'Submissions'}</h2>
+              <div className="filter-chips">
+                {filters.map((f) => (
+                  <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+                    {f.label} <span className="count">{counts[f.id]}</span>
                   </button>
-                )
-              }
-            />
-          ))}
-        </div>
+                ))}
+              </div>
+            </div>
+            <div className="feed">
+              {shown.length === 0 && (
+                <p className="empty muted">
+                  {filter === 'mine' ? 'Nothing sent yet. Your questions and ideas will show up here.' : 'No submissions yet.'}
+                </p>
+              )}
+              {shown.map((s) => (
+                <SubmissionCard
+                  key={s.id}
+                  submission={s}
+                  onJump={jumpTo}
+                  actions={
+                    (presenter || s.author === name) && (
+                      <button
+                        className="link danger"
+                        onClick={() => {
+                          if (confirm('Delete this submission?')) remove('submissions', s.id)
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )
+                  }
+                />
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <div
@@ -246,7 +298,7 @@ export default function ManualPage() {
         aria-label="Resize the side panel"
         aria-valuenow={sideWidth}
         tabIndex={0}
-        title="Drag to resize · double-click to collapse"
+        title="Drag to resize · all the way left collapses · all the way right opens the Question Board"
         onPointerDown={startResize}
         onDoubleClick={() => setSideCollapsed(true)}
         onKeyDown={(e) => {
@@ -254,6 +306,11 @@ export default function ManualPage() {
           else if (e.key === 'ArrowRight') setSideWidth((w) => Math.min(maxSide(), w + 24))
         }}
       />
+
+      <button className="manual-rail" onClick={() => setBoardOpen(false)} title="Show the manual" aria-label="Show the manual">
+        <span aria-hidden>«</span>
+        <span className="rail-label">Game manual</span>
+      </button>
 
       <section className="manual-panel">
         <ManualReader
