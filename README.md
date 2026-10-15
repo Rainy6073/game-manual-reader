@@ -11,6 +11,7 @@ A dashboard for running an FRC kickoff. It works on every device, syncs live and
 2. **Effort / Value**: the presenter lists robot abilities and rates effort and value on the Fibonacci scale (other numbers are rejected). The scatter plot updates live on every screen. Abilities with identical ratings share a marker with every name listed.
 3. **Archetypes**: a Trello-style board. Drag abilities (each one can be reused) onto robot archetypes. The presenter's board is the master copy. Standard users can view it or build their own private board, which never affects the master.
 4. **Prototypes**: the presenter turns questions and ideas into prototype tasks, edits them (edits show on the Game Manual page too), assigns people by name and tracks status. Anyone can open a prototype and post results, notes and photos.
+5. **Tools**: strategy tools, starting with the **Field Board**. Kick-Office finds the top-down field drawing in the game manual (tested on the 2006, 2012, 2016, 2017, 2020 and 2026 manuals). The presenter confirms it, can re-crop it or pick another page, or uploads any image or PDF instead. Place red and blue robots, then draw freehand paths, straight lines and arrows. The presenter's board is shown live on every screen; Standard users can also sketch on their own private copy.
 
 ## Run locally
 

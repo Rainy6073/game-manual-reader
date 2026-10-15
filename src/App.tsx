@@ -3,6 +3,7 @@ import ArchetypesPage from './pages/ArchetypesPage'
 import EffortValuePage from './pages/EffortValuePage'
 import ManualPage from './pages/ManualPage'
 import PrototypesPage from './pages/PrototypesPage'
+import ToolsPage from './pages/ToolsPage'
 import Welcome from './pages/Welcome'
 import { SessionContext, useLocalState, useStoredSession } from './session'
 import { syncMode, useSyncStatus } from './sync/store'
@@ -13,6 +14,7 @@ const PAGES = [
   { path: 'effort-value', label: 'Effort / Value', short: 'E/V' },
   { path: 'archetypes', label: 'Archetypes', short: 'Archetypes' },
   { path: 'prototypes', label: 'Prototypes', short: 'Prototypes' },
+  { path: 'tools', label: 'Tools', short: 'Tools' },
 ] as const
 
 /** The current route from the URL hash, e.g. "#/prototypes/abc" → ["prototypes", "abc"]. */
@@ -104,6 +106,7 @@ export default function App() {
           {page.path === 'effort-value' && <EffortValuePage />}
           {page.path === 'archetypes' && <ArchetypesPage />}
           {page.path === 'prototypes' && <PrototypesPage openId={route[1]} />}
+          {page.path === 'tools' && <ToolsPage toolId={route[1]} />}
         </main>
       </div>
     </SessionContext.Provider>

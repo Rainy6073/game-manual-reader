@@ -1,0 +1,428 @@
+import { useEffect, useRef, useState } from 'react'
+import { useIsPresenter, useLocalState } from '../session'
+import { put, useDoc, useFileUrl } from '../sync/store'
+import { newId, type Alliance, type BoardRobot, type BoardStroke, type FieldBoard as Board } from '../types'
+import FieldPicker from './FieldPicker'
+
+type Tool = 'move' | 'pen' | 'line' | 'erase'
+
+const COLORS = [
+  { value: '#d0101b', name: 'Red' },
+  { value: '#1d6fa8', name: 'Blue' },
+  { value: '#f5c400', name: 'Yellow' },
+  { value: '#18a058', name: 'Green' },
+  { value: '#ffffff', name: 'White' },
+  { value: '#111111', name: 'Black' },
+]
+const WIDTHS = [
+  { value: 0.003, name: 'Thin' },
+  { value: 0.006, name: 'Medium' },
+  { value: 0.011, name: 'Thick' },
+]
+const ALLIANCE_FILL: Record<Alliance, string> = { red: '#d0101b', blue: '#1d6fa8', neutral: '#555' }
+/** Width of the drawing in SVG units; height follows the field image. */
+const VW = 1000
+const UNDO_LIMIT = 50
+
+const emptyBoard = (id: string): Board => ({ id, robots: [], strokes: [], robotSize: 0.055 })
+
+/** Distance from point p to segment ab. */
+function segDist(p: [number, number], a: [number, number], b: [number, number]) {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const len = dx * dx + dy * dy
+  const t = len ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len)) : 0
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+}
+
+export default function FieldBoard() {
+  const presenter = useIsPresenter()
+  const field = useDoc('field', 'current')
+  const fieldUrl = useFileUrl(field?.url)
+  const master = useDoc('boards', 'master')
+  const [mine, setMine] = useLocalState<Board>('kickoff.myFieldBoard', emptyBoard('mine'))
+  const [view, setView] = useLocalState<'master' | 'mine'>('kickoff.fieldView', 'master')
+  const showingMine = !presenter && view === 'mine'
+  const editable = presenter || showingMine
+  const stored = showingMine ? mine : (master ?? emptyBoard('master'))
+
+  const [tool, setTool] = useState<Tool>('pen')
+  const [color, setColor] = useState(COLORS[2].value)
+  const [width, setWidth] = useState(WIDTHS[1].value)
+  const [arrow, setArrow] = useState(true)
+  const [picking, setPicking] = useState(false)
+  // In-progress changes (a robot being dragged, a stroke being drawn) shown before saving.
+  const [draft, setDraftState] = useState<Board | null>(null)
+  const [pending, setPendingState] = useState<BoardStroke | null>(null)
+  // Mirrors of the above, so pointer handlers never act on a stale render.
+  const draftRef = useRef<Board | null>(null)
+  const pendingRef = useRef<BoardStroke | null>(null)
+  const setDraft = (b: Board | null) => {
+    draftRef.current = b
+    setDraftState(b)
+  }
+  const setPending = (st: BoardStroke | null) => {
+    pendingRef.current = st
+    setPendingState(st)
+  }
+  const historyRef = useRef<Board[]>([])
+  const svgRef = useRef<SVGSVGElement>(null)
+  const gesture = useRef<{ kind: 'robot'; id: string; dx: number; dy: number; lastSent: number } | { kind: 'draw' } | { kind: 'erase' } | null>(null)
+
+  const board = draft ?? stored
+  const aspect = field ? field.height / field.width : 0.5
+  const VH = VW * aspect
+  const robotPx = board.robotSize * VW
+
+  const save = (b: Board) => (showingMine ? setMine(b) : put('boards', b))
+  /** Saves a change that can be undone. */
+  const commit = (b: Board) => {
+    historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
+    save(b)
+  }
+  const undo = () => {
+    const prev = historyRef.current.pop()
+    if (prev) save(prev)
+  }
+
+  // Undo history belongs to one board.
+  useEffect(() => {
+    historyRef.current = []
+  }, [showingMine])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && editable && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault()
+        undo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  /** The pointer position in SVG units. */
+  const toSvg = (e: React.PointerEvent | React.MouseEvent): [number, number] => {
+    const svg = svgRef.current!
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM()!.inverse())
+    return [Math.max(0, Math.min(VW, pt.x)), Math.max(0, Math.min(VH, pt.y))]
+  }
+  const norm = ([x, y]: [number, number]): [number, number] => [x / VW, y / VH]
+  const px = ([x, y]: [number, number]): [number, number] => [x * VW, y * VH]
+
+  const robotAt = (p: [number, number], robots = board.robots) =>
+    [...robots].reverse().find((r) => {
+      const [cx, cy] = px([r.x, r.y])
+      return Math.abs(p[0] - cx) <= robotPx / 2 && Math.abs(p[1] - cy) <= robotPx / 2
+    })
+
+  /** Removes whatever is under the pointer (robots first, then the top-most line). */
+  const eraseAt = (p: [number, number], b: Board): Board => {
+    const robot = robotAt(p, b.robots)
+    if (robot) return { ...b, robots: b.robots.filter((r) => r !== robot) }
+    for (let i = b.strokes.length - 1; i >= 0; i--) {
+      const s = b.strokes[i]
+      const pts = s.points.map(px)
+      const reach = Math.max(10, (s.width * VW) / 2 + 6)
+      const hit = pts.length === 1 ? Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) < reach : pts.some((q, j) => j > 0 && segDist(p, pts[j - 1], q) < reach)
+      if (hit) return { ...b, strokes: b.strokes.filter((_, j) => j !== i) }
+    }
+    return b
+  }
+
+  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!editable || !field || e.button !== 0) return
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // Capture is best-effort; drawing still works without it.
+    }
+    const p = toSvg(e)
+    if (tool === 'move') {
+      const robot = robotAt(p)
+      if (!robot) return
+      const [cx, cy] = px([robot.x, robot.y])
+      gesture.current = { kind: 'robot', id: robot.id, dx: p[0] - cx, dy: p[1] - cy, lastSent: 0 }
+      historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
+      setDraft(stored)
+    } else if (tool === 'erase') {
+      gesture.current = { kind: 'erase' }
+      historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
+      setDraft(eraseAt(p, stored))
+    } else {
+      gesture.current = { kind: 'draw' }
+      setPending({ id: newId(), kind: tool, points: [norm(p), norm(p)], color, width, arrow })
+    }
+  }
+
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const g = gesture.current
+    if (!g) return
+    const p = toSvg(e)
+    if (g.kind === 'robot') {
+      const current = draftRef.current ?? stored
+      const next = { ...current, robots: current.robots.map((r) => (r.id === g.id ? { ...r, ...xy(norm([p[0] - g.dx, p[1] - g.dy])) } : r)) }
+      setDraft(next)
+      // Keep other screens roughly in step while dragging.
+      if (e.timeStamp - g.lastSent > 120) {
+        g.lastSent = e.timeStamp
+        save(next)
+      }
+    } else if (g.kind === 'erase') {
+      setDraft(eraseAt(p, draftRef.current ?? stored))
+    } else if (pendingRef.current) {
+      const pending = pendingRef.current
+      const q = norm(p)
+      if (pending.kind === 'line') setPending({ ...pending, points: [pending.points[0], q] })
+      else {
+        const last = px(pending.points[pending.points.length - 1])
+        if (Math.hypot(p[0] - last[0], p[1] - last[1]) > 3) setPending({ ...pending, points: [...pending.points, q] })
+      }
+    }
+  }
+
+  const onUp = () => {
+    const g = gesture.current
+    gesture.current = null
+    if (!g) return
+    if (g.kind === 'draw') {
+      const stroke = pendingRef.current
+      if (stroke) commit({ ...stored, strokes: [...stored.strokes, stroke] })
+      setPending(null)
+    } else if (draftRef.current) {
+      save(draftRef.current)
+      setDraft(null)
+    }
+  }
+
+  const xy = ([x, y]: [number, number]) => ({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })
+
+  const addRobot = (alliance: Alliance) => {
+    const same = stored.robots.filter((r) => r.alliance === alliance)
+    const prefix = alliance === 'red' ? 'R' : alliance === 'blue' ? 'B' : 'N'
+    const slot = same.length % 3
+    const robot: BoardRobot = {
+      id: newId(),
+      alliance,
+      label: `${prefix}${same.length + 1}`,
+      x: alliance === 'red' ? 0.12 : alliance === 'blue' ? 0.88 : 0.5,
+      y: 0.3 + slot * 0.2,
+    }
+    commit({ ...stored, robots: [...stored.robots, robot] })
+    setTool('move')
+  }
+
+  const rename = (e: React.MouseEvent) => {
+    if (!editable) return
+    const robot = robotAt(toSvg(e))
+    if (!robot) return
+    const label = prompt('Robot label (e.g. team number)', robot.label)?.trim()
+    if (label) commit({ ...stored, robots: stored.robots.map((r) => (r.id === robot.id ? { ...r, label: label.slice(0, 8) } : r)) })
+  }
+
+  const copyMaster = () => {
+    if ((mine.strokes.length || mine.robots.length) && !confirm('Replace your board with a copy of the master board?')) return
+    setMine({ ...(master ?? emptyBoard('mine')), id: 'mine' })
+  }
+
+  const strokes = pending ? [...board.strokes, pending] : board.strokes
+
+  return (
+    <div className="field-board">
+      <div className="fb-toolbar">
+        {!presenter && (
+          <div className="segmented" role="radiogroup" aria-label="Board">
+            <button role="radio" aria-checked={view === 'master'} onClick={() => setView('master')}>
+              Master board
+            </button>
+            <button role="radio" aria-checked={view === 'mine'} onClick={() => setView('mine')}>
+              My board
+            </button>
+          </div>
+        )}
+        {showingMine && <button onClick={copyMaster}>Copy master</button>}
+
+        {editable && field && (
+          <>
+            <div className="segmented" role="radiogroup" aria-label="Tool">
+              {(
+                [
+                  ['move', '✋ Move'],
+                  ['pen', '✎ Draw'],
+                  ['line', '╱ Line'],
+                  ['erase', '⌫ Erase'],
+                ] as [Tool, string][]
+              ).map(([t, label]) => (
+                <button key={t} role="radio" aria-checked={tool === t} onClick={() => setTool(t)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(tool === 'pen' || tool === 'line') && (
+              <>
+                <div className="swatches" role="radiogroup" aria-label="Color">
+                  {COLORS.map((c) => (
+                    <button
+                      key={c.value}
+                      role="radio"
+                      aria-checked={color === c.value}
+                      aria-label={c.name}
+                      title={c.name}
+                      className="swatch"
+                      style={{ background: c.value }}
+                      onClick={() => setColor(c.value)}
+                    />
+                  ))}
+                </div>
+                <select value={width} onChange={(e) => setWidth(Number(e.target.value))} aria-label="Line width">
+                  {WIDTHS.map((w) => (
+                    <option key={w.value} value={w.value}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+                <label className="check">
+                  <input type="checkbox" checked={arrow} onChange={(e) => setArrow(e.target.checked)} /> Arrow
+                </label>
+              </>
+            )}
+            <span className="fb-sep" />
+            <button className="robot-btn red" onClick={() => addRobot('red')}>
+              + Red robot
+            </button>
+            <button className="robot-btn blue" onClick={() => addRobot('blue')}>
+              + Blue robot
+            </button>
+            <label className="size">
+              <span className="muted small">Robot size</span>
+              <input
+                type="range"
+                min={0.02}
+                max={0.12}
+                step={0.005}
+                value={stored.robotSize}
+                onChange={(e) => save({ ...stored, robotSize: Number(e.target.value) })}
+              />
+            </label>
+            <span className="fb-sep" />
+            <button onClick={undo} title="Undo (⌘Z / Ctrl+Z)">
+              ↶ Undo
+            </button>
+            <button
+              onClick={() => stored.strokes.length && confirm('Erase all drawings?') && commit({ ...stored, strokes: [] })}
+              disabled={!stored.strokes.length}
+            >
+              Clear lines
+            </button>
+            <button
+              onClick={() => stored.robots.length && confirm('Remove all robots?') && commit({ ...stored, robots: [] })}
+              disabled={!stored.robots.length}
+            >
+              Clear robots
+            </button>
+          </>
+        )}
+        <span style={{ flex: 1 }} />
+        {field && <span className="muted small fb-source">Field: {field.source}</span>}
+        {presenter && <button onClick={() => setPicking(true)}>{field ? 'Change field' : 'Choose field'}</button>}
+      </div>
+
+      <div className="fb-stage">
+        {!field ? (
+          <div className="empty-manual">
+            <h3>{presenter ? 'Set up the field' : 'Waiting for the field'}</h3>
+            <p className="muted">
+              {presenter
+                ? 'Kick-Office finds the top-down field drawing in the game manual. You can adjust the crop, pick another page, or upload your own image or PDF.'
+                : 'The presenter hasn’t chosen the field yet. It will appear here automatically.'}
+            </p>
+            {presenter && (
+              <button className="primary" onClick={() => setPicking(true)}>
+                Choose field
+              </button>
+            )}
+          </div>
+        ) : (
+          <svg
+            ref={svgRef}
+            className={`fb-svg tool-${editable ? tool : 'view'}`}
+            viewBox={`0 0 ${VW} ${VH}`}
+            preserveAspectRatio="xMidYMid meet"
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+            onDoubleClick={rename}
+          >
+            {fieldUrl && <image href={fieldUrl} x={0} y={0} width={VW} height={VH} preserveAspectRatio="none" />}
+            {strokes.map((s) => (
+              <StrokeView key={s.id} stroke={s} px={px} />
+            ))}
+            {board.robots.map((r) => {
+              const [cx, cy] = px([r.x, r.y])
+              return (
+                <g key={r.id} className="fb-robot" transform={`translate(${cx} ${cy})`}>
+                  <rect
+                    x={-robotPx / 2}
+                    y={-robotPx / 2}
+                    width={robotPx}
+                    height={robotPx}
+                    rx={robotPx * 0.18}
+                    fill={ALLIANCE_FILL[r.alliance]}
+                    stroke="#fff"
+                    strokeWidth={Math.max(1.5, robotPx * 0.06)}
+                  />
+                  <text textAnchor="middle" dominantBaseline="central" fontSize={Math.max(9, robotPx * (r.label.length > 3 ? 0.3 : 0.4))}>
+                    {r.label}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+        )}
+      </div>
+      {editable && field && (
+        <p className="muted small fb-hint">
+          {tool === 'move' && 'Drag robots to move them. Double-click a robot to rename it (e.g. a team number).'}
+          {tool === 'pen' && 'Draw paths freehand.'}
+          {tool === 'line' && 'Drag to draw a straight line.'}
+          {tool === 'erase' && 'Click or drag over lines and robots to erase them.'}
+        </p>
+      )}
+
+      {picking && <FieldPicker onClose={() => setPicking(false)} />}
+    </div>
+  )
+}
+
+function StrokeView({ stroke: s, px }: { stroke: BoardStroke; px: (p: [number, number]) => [number, number] }) {
+  const pts = s.points.map(px)
+  const w = s.width * VW
+  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
+  let head: string | null = null
+  if (s.arrow && pts.length > 1) {
+    // Aim the head along the last few points, so a shaky finish doesn't skew it.
+    const tip = pts[pts.length - 1]
+    let from = pts[pts.length - 2]
+    for (let i = pts.length - 2; i >= 0; i--) {
+      from = pts[i]
+      if (Math.hypot(tip[0] - from[0], tip[1] - from[1]) > w * 4 + 8) break
+    }
+    const angle = Math.atan2(tip[1] - from[1], tip[0] - from[0])
+    const len = w * 3 + 10
+    const spread = 0.45
+    const a = [tip[0] - len * Math.cos(angle - spread), tip[1] - len * Math.sin(angle - spread)]
+    const b = [tip[0] - len * Math.cos(angle + spread), tip[1] - len * Math.sin(angle + spread)]
+    head = `${tip[0]},${tip[1]} ${a[0]},${a[1]} ${b[0]},${b[1]}`
+  }
+  const outline = s.color === '#ffffff' ? 'rgb(0 0 0 / 0.45)' : 'rgb(255 255 255 / 0.7)'
+  return (
+    <g className="fb-stroke">
+      {/* A faint outline keeps lines visible on any part of the field. */}
+      <path d={d} fill="none" stroke={outline} strokeWidth={w + 3} strokeLinecap="round" strokeLinejoin="round" />
+      {head && <polygon points={head} fill={outline} stroke={outline} strokeWidth={3} strokeLinejoin="round" />}
+      <path d={d} fill="none" stroke={s.color} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />
+      {head && <polygon points={head} fill={s.color} />}
+    </g>
+  )
+}

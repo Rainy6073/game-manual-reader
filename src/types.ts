@@ -65,12 +65,56 @@ export interface ManualMeta {
   uploadedAt: number
 }
 
+/** The top-down field image used by the Field Board. */
+export interface FieldImage {
+  id: 'current'
+  url: string
+  width: number
+  height: number
+  /** Where it came from, e.g. "2026 manual, page 18". */
+  source: string
+  setBy: string
+  setAt: number
+}
+
+export type Alliance = 'red' | 'blue' | 'neutral'
+
+/** A robot token; x/y are its center as fractions of the field image's width/height. */
+export interface BoardRobot {
+  id: string
+  x: number
+  y: number
+  alliance: Alliance
+  label: string
+}
+
+/** A drawn line or path; points are fractions of the image's width/height. */
+export interface BoardStroke {
+  id: string
+  kind: 'pen' | 'line'
+  points: [number, number][]
+  color: string
+  /** Line width as a fraction of the image width. */
+  width: number
+  arrow: boolean
+}
+
+export interface FieldBoard {
+  id: string
+  robots: BoardRobot[]
+  strokes: BoardStroke[]
+  /** Robot size as a fraction of the image width. */
+  robotSize: number
+}
+
 export interface Collections {
   submissions: Submission
   abilities: Ability
   archetypes: Archetype
   responses: PrototypeResponse
   meta: ManualMeta
+  field: FieldImage
+  boards: FieldBoard
 }
 
 export type CollectionName = keyof Collections

@@ -187,6 +187,15 @@ export default function ManualPage() {
       <button className="primary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
         {uploading ? 'Uploading…' : manual ? 'Replace manual' : 'Upload manual'}
       </button>
+      {manual && manual.url !== SAMPLE.url && (
+        <button
+          onClick={() => confirm('Switch everyone back to the bundled 2026 manual?') && shareSample()}
+          disabled={uploading}
+          title="Switch back to the bundled 2026 manual"
+        >
+          Use 2026 manual
+        </button>
+      )}
       <input
         ref={fileInputRef}
         type="file"
