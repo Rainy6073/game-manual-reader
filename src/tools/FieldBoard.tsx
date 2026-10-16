@@ -29,6 +29,14 @@ const UNDO_LIMIT = 50
 
 const emptyBoard = (): Board => ({ robots: [], strokes: [], robotSize: 0.055 })
 
+/** A named board kept on this device. */
+interface SavedBoard {
+  id: string
+  name: string
+  board: Board
+  updatedAt: number
+}
+
 /** Distance from point p to segment ab. */
 function segDist(p: [number, number], a: [number, number], b: [number, number]) {
   const dx = b[0] - a[0]
@@ -46,7 +54,17 @@ export default function FieldBoard() {
   const manual = useDoc('meta', 'manual')
   const [field, setField] = useLocalState<FieldImage | null>('kickoff.fieldImage', null)
   const fieldUrl = useLocalFileUrl(field?.key)
-  const [stored, setStored] = useLocalState<Board>('kickoff.fieldBoard', emptyBoard())
+  // Boards from before there could be several live under the old key.
+  const [legacy] = useLocalState<Board>('kickoff.fieldBoard', emptyBoard())
+  const [savedBoards, setSavedBoards] = useLocalState<SavedBoard[]>('kickoff.fieldBoards', [])
+  const [currentId, setCurrentId] = useLocalState('kickoff.fieldBoardCurrent', '')
+  const withDefault = (list: SavedBoard[]) => (list.length ? list : [{ id: 'board-1', name: 'Board 1', board: legacy, updatedAt: 0 }])
+  const boards = withDefault(savedBoards)
+  const current = boards.find((b) => b.id === currentId) ?? boards[0]
+  const stored = current.board
+  const updateBoards = (fn: (list: SavedBoard[]) => SavedBoard[]) => setSavedBoards((prev) => fn(withDefault(prev)))
+  const setStored = (b: Board) => updateBoards((list) => list.map((x) => (x.id === current.id ? { ...x, board: b, updatedAt: Date.now() } : x)))
+  const [copied, setCopied] = useState<string | null>(null)
   const [finding, setFinding] = useState(false)
 
   const [tool, setTool] = useState<Tool>('pen')
@@ -243,11 +261,141 @@ export default function FieldBoard() {
     if (label) commit({ ...stored, robots: stored.robots.map((r) => (r.id === robot.id ? { ...r, label: label.slice(0, 8) } : r)) })
   }
 
+  const switchTo = (id: string) => {
+    historyRef.current = []
+    setCurrentId(id)
+  }
+  const nextName = (base: string) => {
+    let n = 1
+    while (boards.some((b) => b.name === `${base} ${n}`)) n++
+    return `${base} ${n}`
+  }
+  const newBoard = (copyOf?: SavedBoard) => {
+    const name = prompt('Name this board', copyOf ? `${copyOf.name} copy` : nextName('Board'))?.trim()
+    if (!name) return
+    const id = newId()
+    const board: Board = copyOf ? structuredClone(copyOf.board) : { ...emptyBoard(), robotSize: stored.robotSize }
+    updateBoards((list) => [...list, { id, name: name.slice(0, 40), board, updatedAt: Date.now() }])
+    switchTo(id)
+  }
+  const renameBoard = () => {
+    const name = prompt('Rename this board', current.name)?.trim()
+    if (name) updateBoards((list) => list.map((x) => (x.id === current.id ? { ...x, name: name.slice(0, 40) } : x)))
+  }
+  const deleteBoard = () => {
+    if (!confirm(`Delete the board “${current.name}”?`)) return
+    const rest = boards.filter((b) => b.id !== current.id)
+    updateBoards(() => (rest.length ? rest : [{ id: newId(), name: 'Board 1', board: emptyBoard(), updatedAt: Date.now() }]))
+    switchTo(rest[0]?.id ?? '')
+  }
+
+  /** Draws the field with the board on top, as a PNG. */
+  const renderImage = async (): Promise<Blob> => {
+    const svg = svgRef.current
+    if (!svg || !fieldUrl || !field) throw new Error('No board to render')
+    const scale = Math.min(2, 2400 / field.width) * (field.width / VW)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(VW * scale)
+    canvas.height = Math.round(VH * scale)
+    const ctx = canvas.getContext('2d')!
+    const load = (src: string) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = reject
+        img.src = src
+      })
+    ctx.drawImage(await load(fieldUrl), 0, 0, canvas.width, canvas.height)
+    // The drawings and robots, without the field image (an SVG drawn as an image can't load it).
+    const clone = svg.cloneNode(true) as SVGSVGElement
+    clone.querySelector('image')?.remove()
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    clone.setAttribute('width', String(canvas.width))
+    clone.setAttribute('height', String(canvas.height))
+    for (const t of clone.querySelectorAll('text')) {
+      t.setAttribute('fill', '#fff')
+      t.setAttribute('font-family', 'Helvetica, Arial, sans-serif')
+      t.setAttribute('font-weight', '700')
+    }
+    const overlay = await load(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`)
+    ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height)
+    // Name the board in the corner, so copies are easy to tell apart.
+    const fs = Math.round(canvas.width * 0.022)
+    ctx.font = `700 ${fs}px Helvetica, Arial, sans-serif`
+    const pad = fs * 0.5
+    const w = ctx.measureText(current.name).width
+    ctx.fillStyle = 'rgb(0 0 0 / 0.6)'
+    ctx.fillRect(pad, pad, w + pad * 2, fs + pad * 1.4)
+    ctx.fillStyle = '#fff'
+    ctx.textBaseline = 'top'
+    ctx.fillText(current.name, pad * 2, pad * 1.7)
+    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render'))), 'image/png'))
+  }
+
+  const flash = (message: string) => {
+    setCopied(message)
+    setTimeout(() => setCopied(null), 2200)
+  }
+  const fileName = () => `${current.name.replace(/[^\w -]+/g, '').trim() || 'field-board'}.png`
+  const downloadImage = async (blob?: Blob) => {
+    const url = URL.createObjectURL(blob ?? (await renderImage()))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName()
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const copyImage = async () => {
+    const blob = renderImage()
+    try {
+      // Passing the promise keeps Safari's "user gesture" intact while the image renders.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      flash('Image copied ✓')
+    } catch {
+      try {
+        const file = new File([await blob], fileName(), { type: 'image/png' })
+        if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: current.name })
+        else await downloadImage(await blob)
+        flash('Saved image ✓')
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') flash('Could not copy the image')
+      }
+    }
+  }
 
   const strokes = pending ? [...board.strokes, pending] : board.strokes
 
   return (
     <div className="field-board">
+      {field && (
+        <div className="fb-toolbar fb-boards">
+          <select value={current.id} onChange={(e) => switchTo(e.target.value)} aria-label="Board" className="fb-board-select">
+            {boards.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+          <button onClick={() => newBoard()}>+ New</button>
+          <button onClick={() => newBoard(current)} title="Make a copy of this board">
+            ⧉ Duplicate
+          </button>
+          <button onClick={renameBoard}>Rename</button>
+          <button className="danger" onClick={deleteBoard}>
+            Delete
+          </button>
+          <span style={{ flex: 1 }} />
+          <span className="muted small" aria-live="polite">
+            {copied ?? `${boards.length} ${boards.length === 1 ? 'board' : 'boards'} saved on this device`}
+          </span>
+          <button onClick={copyImage} disabled={!fieldUrl} title="Copy this board as an image to paste anywhere">
+            Copy image
+          </button>
+          <button onClick={() => downloadImage().catch(() => flash('Could not save the image'))} disabled={!fieldUrl}>
+            Save PNG
+          </button>
+        </div>
+      )}
       <div className="fb-toolbar">
         {field && (
           <>

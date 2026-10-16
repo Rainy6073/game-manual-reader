@@ -12,7 +12,6 @@ export default function EffortValuePage() {
   const [name, setName] = useState('')
   const [highlight, setHighlight] = useState<string | null>(null)
   const sorted = useMemo(() => [...abilities].sort((a, b) => a.createdAt - b.createdAt), [abilities])
-  const unplotted = sorted.filter((a) => a.effort == null || a.value == null)
 
   const add = () => {
     const trimmed = name.trim()
@@ -29,7 +28,7 @@ export default function EffortValuePage() {
           <span className="muted">{sorted.length} total</span>
         </header>
         <p className="muted small">
-          Rate effort and value on the Fibonacci scale ({FIB.slice(0, 7).join(', ')}…).
+          Rate effort and value on the Fibonacci scale ({FIB.slice(0, 7).join(', ')}…){presenter && ', or drag points on the chart'}.
           {!presenter && ' The presenter edits this list; it updates here live.'}
         </p>
 
@@ -111,12 +110,12 @@ export default function EffortValuePage() {
       </section>
 
       <section className="ev-chart">
-        <ScatterChart abilities={sorted} highlight={highlight} onHighlight={setHighlight} />
-        {unplotted.length > 0 && (
-          <p className="muted small unplotted">
-            Not plotted yet (needs both ratings): {unplotted.map((a) => a.name).join(', ')}
-          </p>
-        )}
+        <ScatterChart
+          abilities={sorted}
+          highlight={highlight}
+          onHighlight={setHighlight}
+          onRate={presenter ? (ids, effort, value) => ids.forEach((id) => patch('abilities', id, { effort, value })) : undefined}
+        />
       </section>
     </div>
   )

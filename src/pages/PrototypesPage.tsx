@@ -1,3 +1,14 @@
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
 import { useMemo, useRef, useState } from 'react'
 import RefChip from '../components/RefChip'
 import SubmissionCard from '../components/SubmissionCard'
@@ -13,7 +24,7 @@ const STATUS: { id: PrototypeStatus; label: string }[] = [
 ]
 const statusLabel = (s: PrototypeStatus) => STATUS.find((x) => x.id === s)!.label
 
-type Filter = 'all' | 'mine' | PrototypeStatus
+type Filter = 'all' | 'mine'
 
 const isAssigned = (s: Submission, name: string) =>
   !!s.prototype?.assignees.some((a) => a.trim().toLowerCase() === name.trim().toLowerCase())
@@ -24,6 +35,11 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   const submissions = useCollection('submissions')
   const responses = useCollection('responses')
   const [filter, setFilter] = useState<Filter>('all')
+  const [dragging, setDragging] = useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
 
   const prototypes = useMemo(
     () => submissions.filter((s) => s.prototype).sort((a, b) => a.prototype!.createdAt - b.prototype!.createdAt),
@@ -39,92 +55,155 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   const open = openId ? submissions.find((s) => s.id === openId) : undefined
   if (openId && open?.prototype) return <PrototypeDetail submission={open} />
 
-  const shown = prototypes.filter((p) =>
-    filter === 'all' ? true : filter === 'mine' ? isAssigned(p, name) : p.prototype!.status === filter,
-  )
-  const promote = (s: Submission) => patch('submissions', s.id, { prototype: { assignees: [], status: 'todo', createdAt: Date.now() } })
+  const shown = prototypes.filter((p) => filter === 'all' || isAssigned(p, name))
+  const promote = (s: Submission, status: PrototypeStatus = 'todo') =>
+    patch('submissions', s.id, { prototype: { assignees: [], status, createdAt: Date.now() } })
+  const canMove = (s: Submission) => presenter || (!!s.prototype && isAssigned(s, name))
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(null)
+    const status = over?.id as PrototypeStatus | undefined
+    const s = submissions.find((x) => x.id === active.id)
+    if (!s || !status) return
+    if (!s.prototype) promote(s, status)
+    else if (s.prototype.status !== status) patch('submissions', s.id, { prototype: { ...s.prototype, status } })
+  }
+  const dragged = dragging ? submissions.find((x) => x.id === dragging) : undefined
 
   return (
-    <div className={`proto-page${presenter ? ' with-inbox' : ''}`}>
-      {presenter && (
-        <aside className="inbox">
-          <header className="section-head">
-            <h2>From brainstorming</h2>
-            <span className="muted">{inbox.length}</span>
-          </header>
-          <p className="muted small">Turn questions and ideas into prototype tasks, then assign people to them.</p>
-          <div className="feed">
-            {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
-            {inbox.map((s) => (
-              <SubmissionCard
-                key={s.id}
-                submission={s}
-                actions={
-                  <button className="small primary" onClick={() => promote(s)}>
-                    Make prototype →
-                  </button>
-                }
-              />
-            ))}
-          </div>
-        </aside>
-      )}
-
-      <section className="proto-main">
-        <header className="section-head wrap">
-          <h2>Prototypes</h2>
-          <div className="filter-chips">
-            {(
-              [
-                { id: 'all', label: 'All', n: prototypes.length },
-                { id: 'mine', label: 'Assigned to me', n: prototypes.filter((p) => isAssigned(p, name)).length },
-                ...STATUS.map((s) => ({ id: s.id, label: s.label, n: prototypes.filter((p) => p.prototype!.status === s.id).length })),
-              ] as { id: Filter; label: string; n: number }[]
-            ).map((f) => (
-              <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-                {f.label} <span className="count">{f.n}</span>
-              </button>
-            ))}
-          </div>
-        </header>
-
-        {shown.length === 0 && (
-          <p className="empty muted">
-            {prototypes.length === 0
-              ? presenter
-                ? 'Pick questions and ideas from the left to make them official prototypes.'
-                : 'No prototypes yet. The presenter will create them from the team’s questions and ideas.'
-              : 'Nothing matches this filter.'}
-          </p>
+    <DndContext sensors={sensors} onDragStart={(e) => setDragging(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+      <div className={`proto-page${presenter ? ' with-inbox' : ''}`}>
+        {presenter && (
+          <aside className="inbox">
+            <header className="section-head">
+              <h2>From brainstorming</h2>
+              <span className="muted">{inbox.length}</span>
+            </header>
+            <p className="muted small">Turn questions and ideas into prototype tasks (or drag them into a column), then assign people to them.</p>
+            <div className="feed">
+              {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
+              {inbox.map((s) => (
+                <Draggable key={s.id} id={s.id} enabled>
+                  <SubmissionCard
+                    submission={s}
+                    actions={
+                      <button className="small primary" onPointerDown={(e) => e.stopPropagation()} onClick={() => promote(s)}>
+                        Make prototype →
+                      </button>
+                    }
+                  />
+                </Draggable>
+              ))}
+            </div>
+          </aside>
         )}
 
-        <div className="proto-grid">
-          {shown.map((p) => (
-            <button key={p.id} className={`proto-card status-${p.prototype!.status}`} onClick={() => navigate(`prototypes/${p.id}`)}>
-              <span className="proto-card-top">
-                <span className={`kind-badge ${p.kind}`}>{p.kind === 'question' ? 'Question' : 'Idea'}</span>
-                <span className={`status-pill ${p.prototype!.status}`}>{statusLabel(p.prototype!.status)}</span>
-              </span>
-              <span className="proto-title">{p.text}</span>
-              <span className="assignees">
-                {p.prototype!.assignees.length ? (
-                  p.prototype!.assignees.map((a) => (
-                    <span key={a} className={`person${a.trim().toLowerCase() === name.trim().toLowerCase() ? ' me' : ''}`}>
-                      {a}
-                    </span>
-                  ))
-                ) : (
-                  <span className="muted small">Unassigned</span>
-                )}
-              </span>
-              <span className="muted small">
-                {responseCount.get(p.id) ?? 0} {responseCount.get(p.id) === 1 ? 'update' : 'updates'}
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
+        <section className="proto-main">
+          <header className="section-head wrap">
+            <h2>Prototypes</h2>
+            <div className="filter-chips">
+              {(
+                [
+                  { id: 'all', label: 'All', n: prototypes.length },
+                  { id: 'mine', label: 'Assigned to me', n: prototypes.filter((p) => isAssigned(p, name)).length },
+                ] as { id: Filter; label: string; n: number }[]
+              ).map((f) => (
+                <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+                  {f.label} <span className="count">{f.n}</span>
+                </button>
+              ))}
+            </div>
+          </header>
+          <p className="muted small proto-hint">
+            {presenter
+              ? 'Drag cards between columns to change their status.'
+              : 'Drag prototypes assigned to you between columns to update their status. Tap a card to open it.'}
+          </p>
+
+          {prototypes.length === 0 && (
+            <p className="empty muted">
+              {presenter
+                ? 'Pick questions and ideas from the left to make them official prototypes.'
+                : 'No prototypes yet. The presenter will create them from the team’s questions and ideas.'}
+            </p>
+          )}
+
+          <div className="proto-columns">
+            {STATUS.map((st) => {
+              const items = shown.filter((p) => p.prototype!.status === st.id)
+              return (
+                <StatusColumn key={st.id} status={st.id}>
+                  <header className="column-head">
+                    <h3>{st.label}</h3>
+                    <span className="count-pill">{items.length}</span>
+                  </header>
+                  <div className="column-cards">
+                    {items.map((p) => (
+                      <Draggable key={p.id} id={p.id} enabled={canMove(p)}>
+                        <ProtoCard p={p} updates={responseCount.get(p.id) ?? 0} />
+                      </Draggable>
+                    ))}
+                    {items.length === 0 && <p className="drop-hint muted small">{filter === 'mine' ? 'Nothing of yours here' : 'Drop cards here'}</p>}
+                  </div>
+                </StatusColumn>
+              )
+            })}
+          </div>
+        </section>
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {dragged && (
+          <div className="proto-lifted">
+            {dragged.prototype ? <ProtoCard p={dragged} updates={responseCount.get(dragged.id) ?? 0} /> : <SubmissionCard submission={dragged} />}
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
+  )
+}
+
+function StatusColumn({ status, children }: { status: PrototypeStatus; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: status })
+  return (
+    <section ref={setNodeRef} className={`column proto-column status-${status}${isOver ? ' over' : ''}`}>
+      {children}
+    </section>
+  )
+}
+
+function Draggable({ id, enabled, children }: { id: string; enabled: boolean; children: React.ReactNode }) {
+  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id, disabled: !enabled })
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} role={undefined} tabIndex={undefined} className={`drag-src${isDragging ? ' ghost' : ''}${enabled ? '' : ' static'}`}>
+      {children}
     </div>
+  )
+}
+
+function ProtoCard({ p, updates }: { p: Submission; updates: number }) {
+  const { name } = useSession()
+  return (
+    <button className={`proto-card status-${p.prototype!.status}`} onClick={() => navigate(`prototypes/${p.id}`)}>
+      <span className="proto-card-top">
+        <span className={`kind-badge ${p.kind}`}>{p.kind === 'question' ? 'Question' : 'Idea'}</span>
+        <span className={`status-pill ${p.prototype!.status}`}>{statusLabel(p.prototype!.status)}</span>
+      </span>
+      <span className="proto-title">{p.text}</span>
+      <span className="assignees">
+        {p.prototype!.assignees.length ? (
+          p.prototype!.assignees.map((a) => (
+            <span key={a} className={`person${a.trim().toLowerCase() === name.trim().toLowerCase() ? ' me' : ''}`}>
+              {a}
+            </span>
+          ))
+        ) : (
+          <span className="muted small">Unassigned</span>
+        )}
+      </span>
+      <span className="muted small">
+        {updates} {updates === 1 ? 'update' : 'updates'}
+      </span>
+    </button>
   )
 }
 

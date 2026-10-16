@@ -850,6 +850,63 @@ body.resizing .manual-panel {
 :root[data-role='presenter'] .submission-text {
   font-size: 1.05rem;
 }
+.submission.answerable:not(.answering) {
+  cursor: pointer;
+}
+.submission.answerable:not(.answering):hover {
+  border-color: var(--accent);
+}
+.answers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.answers li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border-left: 3px solid var(--ok);
+  border-radius: 0 8px 8px 0;
+  background: var(--ok-soft);
+}
+.answer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.answer-head .link {
+  margin-left: auto;
+}
+.answer-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.answer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.answer-form textarea {
+  font-size: 16px; /* 16px keeps iOS from zooming in when the keyboard opens */
+  resize: vertical;
+}
+.answer-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+.answer-link {
+  margin-right: auto;
+  font-weight: 600;
+  color: var(--accent);
+}
 .submission-actions {
   display: flex;
   justify-content: flex-end;
@@ -1134,6 +1191,84 @@ span.ability-name {
   color: var(--accent-strong);
   background: var(--accent-soft);
 }
+.chart .marker .grab {
+  fill: transparent;
+  stroke: none;
+  cursor: grab;
+  touch-action: none;
+}
+.chart .marker.lifting circle:not(.grab),
+.chart .label.lifting,
+.tray-chip.lifting {
+  opacity: 0.35;
+}
+.chart.editable .label {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.chart.dragging,
+.chart.dragging * {
+  cursor: grabbing !important;
+}
+.chart .snap-dot {
+  fill: var(--accent);
+  opacity: 0.45;
+  pointer-events: none;
+}
+.chart .snap-dot.active {
+  opacity: 1;
+  fill: var(--accent-strong);
+  stroke: var(--accent-soft);
+  stroke-width: 4;
+}
+.chart .snap-guide {
+  stroke: var(--accent);
+  stroke-dasharray: 4 4;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.drag-ghost {
+  position: absolute;
+  z-index: 5;
+  transform: translate(14px, -50%);
+  display: flex;
+  flex-direction: column;
+  padding: 5px 9px;
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(60 0 0 / 0.18);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.drag-ghost.flip {
+  transform: translate(calc(-100% - 14px), -50%);
+}
+.drag-ghost span {
+  color: var(--accent-strong);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.unplotted-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tray-chip {
+  padding: 3px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--bg);
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
 .chart-legend {
   list-style: none;
   margin: 8px 0 0;
@@ -1413,10 +1548,46 @@ span.ability-name {
   flex-direction: column;
   gap: 14px;
 }
-.proto-grid {
+.proto-hint {
+  margin: -6px 0 0;
+}
+.proto-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.proto-column {
+  width: auto;
+  max-height: none;
+}
+.proto-column.status-active {
+  border-top-color: #e3a008;
+}
+.proto-column.status-done {
+  border-top-color: var(--ok);
+}
+.proto-column .column-cards {
+  gap: 10px;
+  overflow: visible;
+}
+.proto-column .proto-card {
+  width: 100%;
+}
+.proto-column .status-pill {
+  display: none;
+}
+.proto-lifted {
+  width: 280px;
+  cursor: grabbing;
+}
+.proto-lifted > * {
+  box-shadow: 0 10px 30px rgb(60 0 0 / 0.22);
+}
+@media (max-width: 760px) {
+  .proto-columns {
+    grid-template-columns: 1fr;
+  }
 }
 .proto-card {
   display: flex;
@@ -1688,6 +1859,15 @@ span.ability-name {
 }
 .fb-toolbar select {
   padding: 5px 8px;
+}
+.fb-boards {
+  background: var(--surface);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.fb-board-select {
+  font-weight: 700;
+  max-width: 220px;
 }
 .fb-sep {
   width: 1px;

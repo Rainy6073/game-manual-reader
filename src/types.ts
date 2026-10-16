@@ -56,6 +56,15 @@ export interface PrototypeResponse {
   createdAt: number
 }
 
+/** An answer someone posted to a question. */
+export interface Answer {
+  id: string
+  submissionId: string
+  author: string
+  text: string
+  createdAt: number
+}
+
 export interface ManualMeta {
   id: 'manual'
   url: string
@@ -119,6 +128,7 @@ export interface Collections {
   abilities: Ability
   archetypes: Archetype
   responses: PrototypeResponse
+  answers: Answer
   meta: ManualMeta
   priorities: Priorities
 }

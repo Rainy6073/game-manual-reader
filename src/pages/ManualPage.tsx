@@ -281,6 +281,7 @@ export default function ManualPage() {
                   key={s.id}
                   submission={s}
                   onJump={jumpTo}
+                  answerable
                   actions={
                     (presenter || s.author === name) && (
                       <button

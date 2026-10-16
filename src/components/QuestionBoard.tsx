@@ -151,6 +151,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                   key={s.id}
                   submission={s}
                   onJump={onJump}
+                  answerable
                   actions={
                     <>
                       {presenter && !s.prototype && (
