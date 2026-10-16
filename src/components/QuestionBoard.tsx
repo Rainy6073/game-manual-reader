@@ -1,13 +1,16 @@
+import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
 import type { ManualRef } from '../reader/ManualReader'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, remove } from '../sync/store'
 import type { Submission } from '../types'
 import Composer from './Composer'
+import { byRank, reorderOnDrop } from '../reorder'
+import { ListEnd, Sortable } from './Sortable'
 import SubmissionCard from './SubmissionCard'
 
 type GroupBy = 'type' | 'page' | 'person' | 'status'
-type Sort = 'newest' | 'oldest'
+type Sort = 'custom' | 'newest' | 'oldest'
 type Show = 'all' | 'mine'
 
 interface Group {
@@ -23,19 +26,22 @@ const GROUPINGS: { id: GroupBy; label: string }[] = [
   { id: 'status', label: 'Status' },
 ]
 
+/** The group a submission falls in, and that group's title. */
+function groupOf(s: Submission, by: GroupBy): [key: string, title: string] {
+  if (by === 'type') return [s.kind, s.kind === 'question' ? 'Questions' : 'Prototyping ideas']
+  if (by === 'person') return [s.author.toLowerCase(), s.author]
+  if (by === 'status') return s.prototype ? ['proto', 'Made into prototypes'] : ['open', 'Not yet a prototype']
+  if (s.ref) return [String(s.ref.page).padStart(5, '0'), `Page ${s.ref.page}`]
+  return ['~none', 'No reference']
+}
+
 function groupSubmissions(list: Submission[], by: GroupBy): Group[] {
   const groups = new Map<string, Group>()
-  const add = (key: string, title: string, s: Submission) => {
+  for (const s of list) {
+    const [key, title] = groupOf(s, by)
     let g = groups.get(key)
     if (!g) groups.set(key, (g = { key, title, items: [] }))
     g.items.push(s)
-  }
-  for (const s of list) {
-    if (by === 'type') add(s.kind, s.kind === 'question' ? 'Questions' : 'Prototyping ideas', s)
-    else if (by === 'person') add(s.author.toLowerCase(), s.author, s)
-    else if (by === 'status') add(s.prototype ? 'proto' : 'open', s.prototype ? 'Made into prototypes' : 'Not yet a prototype', s)
-    else if (s.ref) add(String(s.ref.page).padStart(5, '0'), `Page ${s.ref.page}`, s)
-    else add('~none', 'No reference', s)
   }
   const result = [...groups.values()]
   if (by === 'type') {
@@ -67,7 +73,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
   const presenter = useIsPresenter()
   const { name } = useSession()
   const [groupBy, setGroupBy] = useLocalState<GroupBy>('kickoff.boardGroup', 'type')
-  const [sort, setSort] = useLocalState<Sort>('kickoff.boardSort', 'newest')
+  const [sort, setSort] = useLocalState<Sort>('kickoff.boardOrder', 'custom')
   const [show, setShow] = useState<Show>('all')
   const [query, setQuery] = useState('')
 
@@ -75,10 +81,20 @@ export default function QuestionBoard({ submissions, reference, onClearReference
     const needle = query.trim().toLowerCase()
     const list = submissions
       .filter((s) => show === 'all' || s.author === name)
-      .filter((s) => !needle || `${s.text} ${s.author} ${s.ref?.quote ?? ''}`.toLowerCase().includes(needle))
-      .sort((a, b) => (sort === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt))
+      .filter((s) => !needle || `${s.text} ${s.author} ${[s.ref, ...(s.refs ?? [])].map((r) => r?.quote ?? '').join(' ')}`.toLowerCase().includes(needle))
+      .sort((a, b) => (sort === 'custom' ? byRank(a, b) : sort === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt))
     return groupSubmissions(list, groupBy)
   }, [submissions, show, name, query, sort, groupBy])
+
+  // The presenter arranges the shared order by dragging, in "Custom order".
+  const canReorder = presenter && sort === 'custom'
+  const ranked = useMemo(() => [...submissions].sort(byRank), [submissions])
+  const [dragging, setDragging] = useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } }),
+  )
+  const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
 
   const total = groups.reduce((n, g) => n + g.items.length, 0)
 
@@ -113,6 +129,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
           <label className="board-select">
             <span className="muted small">Sort</span>
             <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+              <option value="custom">Custom order</option>
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
@@ -136,6 +153,15 @@ export default function QuestionBoard({ submissions, reference, onClearReference
         <Composer reference={reference} onClearReference={onClearReference} onJump={onJump} />
       </details>
 
+      <DndContext
+        sensors={sensors}
+        onDragStart={(e) => setDragging(String(e.active.id))}
+        onDragCancel={() => setDragging(null)}
+        onDragEnd={(e) => {
+          setDragging(null)
+          reorderOnDrop(ranked, e, (s) => groupOf(s, groupBy)[0])
+        }}
+      >
       <div className={`board-columns${groups.length <= 3 ? ' wide' : ''}`}>
         {groups.length === 0 && <p className="empty muted">{query ? 'Nothing matches your search.' : 'No questions or ideas yet.'}</p>}
         {groups.map((g) => (
@@ -147,9 +173,11 @@ export default function QuestionBoard({ submissions, reference, onClearReference
             <div className="board-cards">
               {g.items.length === 0 && <p className="muted small empty">Nothing here yet.</p>}
               {g.items.map((s) => (
+                <Sortable key={s.id} id={s.id} group={g.key} enabled={canReorder}>
+                  {(handle) => (
                 <SubmissionCard
-                  key={s.id}
                   submission={s}
+                  handle={handle}
                   onJump={onJump}
                   answerable
                   actions={
@@ -170,11 +198,16 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                     </>
                   }
                 />
+                  )}
+                </Sortable>
               ))}
+              <ListEnd group={g.key} enabled={canReorder} />
             </div>
           </section>
         ))}
       </div>
+        <DragOverlay dropAnimation={null}>{dragged && <div className="sortable-lifted"><SubmissionCard submission={dragged} /></div>}</DragOverlay>
+      </DndContext>
     </div>
   )
 }

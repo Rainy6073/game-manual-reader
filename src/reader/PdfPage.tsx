@@ -124,7 +124,8 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
         if (seg.end <= start) continue
         if (start > cursor) nodes.push(document.createTextNode(str.slice(cursor, start)))
         const mark = document.createElement('span')
-        mark.className = `highlight${seg.element ? ' element' : ''}${seg.selected ? ' selected' : ''}`
+        mark.className = `highlight${seg.element ? ' element' : ''}${seg.selected ? ' selected' : ''}${seg.note ? (seg.note.hasText ? ' note' : ' marked') : ''}`
+        if (seg.note) mark.dataset.note = seg.note.id
         mark.textContent = str.slice(start, seg.end)
         nodes.push(mark)
         cursor = seg.end

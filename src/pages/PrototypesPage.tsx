@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core'
 import { useMemo, useRef, useState } from 'react'
 import RefChip from '../components/RefChip'
+import { byRank, moveSubmission } from '../reorder'
 import SubmissionCard from '../components/SubmissionCard'
 import { clockTime, navigate } from '../nav'
 import { useIsPresenter, useSession } from '../session'
@@ -42,7 +43,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   )
 
   const prototypes = useMemo(
-    () => submissions.filter((s) => s.prototype).sort((a, b) => a.prototype!.createdAt - b.prototype!.createdAt),
+    () => submissions.filter((s) => s.prototype).sort(byRank),
     [submissions],
   )
   const inbox = useMemo(() => submissions.filter((s) => !s.prototype).sort((a, b) => b.createdAt - a.createdAt), [submissions])
@@ -62,11 +63,16 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     setDragging(null)
-    const status = over?.id as PrototypeStatus | undefined
+    const target = over?.data.current as { status: PrototypeStatus; before?: string } | undefined
     const s = submissions.find((x) => x.id === active.id)
-    if (!s || !status) return
-    if (!s.prototype) promote(s, status)
-    else if (s.prototype.status !== status) patch('submissions', s.id, { prototype: { ...s.prototype, status } })
+    if (!s || !target || target.before === s.id) return
+    const { status, before } = target
+    const prototype = s.prototype ? { ...s.prototype, status } : { assignees: [], status, createdAt: Date.now() }
+    // Dropped on a card: goes just before it. Dropped on a column: goes to its end.
+    const rest = prototypes.filter((p) => p.id !== s.id)
+    const last = rest.filter((p) => p.prototype!.status === status).at(-1)
+    const at = before ?? (last ? rest[rest.indexOf(last) + 1]?.id : rest.find((p) => p.prototype!.status === status)?.id)
+    moveSubmission(prototypes, s.id, at, { prototype })
   }
   const dragged = dragging ? submissions.find((x) => x.id === dragging) : undefined
 
@@ -83,7 +89,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
             <div className="feed">
               {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
               {inbox.map((s) => (
-                <Draggable key={s.id} id={s.id} enabled>
+                <Draggable key={s.id} id={s.id} enabled status={null}>
                   <SubmissionCard
                     submission={s}
                     actions={
@@ -139,7 +145,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
                   </header>
                   <div className="column-cards">
                     {items.map((p) => (
-                      <Draggable key={p.id} id={p.id} enabled={canMove(p)}>
+                      <Draggable key={p.id} id={p.id} enabled={canMove(p)} status={st.id}>
                         <ProtoCard p={p} updates={responseCount.get(p.id) ?? 0} />
                       </Draggable>
                     ))}
@@ -163,7 +169,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
 }
 
 function StatusColumn({ status, children }: { status: PrototypeStatus; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status })
+  const { setNodeRef, isOver } = useDroppable({ id: status, data: { status } })
   return (
     <section ref={setNodeRef} className={`column proto-column status-${status}${isOver ? ' over' : ''}`}>
       {children}
@@ -171,10 +177,22 @@ function StatusColumn({ status, children }: { status: PrototypeStatus; children:
   )
 }
 
-function Draggable({ id, enabled, children }: { id: string; enabled: boolean; children: React.ReactNode }) {
+/** A card that can be dragged; cards in a column are also drop targets, to insert before them. */
+function Draggable({ id, enabled, status, children }: { id: string; enabled: boolean; status: PrototypeStatus | null; children: React.ReactNode }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id, disabled: !enabled })
+  const drop = useDroppable({ id: `before:${id}`, data: { status, before: id }, disabled: !status })
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} role={undefined} tabIndex={undefined} className={`drag-src${isDragging ? ' ghost' : ''}${enabled ? '' : ' static'}`}>
+    <div
+      ref={(el) => {
+        setNodeRef(el)
+        drop.setNodeRef(el)
+      }}
+      {...listeners}
+      {...attributes}
+      role={undefined}
+      tabIndex={undefined}
+      className={`drag-src${isDragging ? ' ghost' : ''}${enabled ? '' : ' static'}${drop.isOver && !isDragging ? ' insert' : ''}`}
+    >
       {children}
     </div>
   )

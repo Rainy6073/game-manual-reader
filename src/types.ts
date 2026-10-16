@@ -15,6 +15,10 @@ export interface Submission {
   createdAt: number
   /** The manual passage it was asked about, if any. */
   ref?: ManualRef
+  /** More passages attached later from the manual. */
+  refs?: ManualRef[]
+  /** Position in the hand-arranged order (see components/reorder.tsx). */
+  order?: number
   /** Set once the presenter turns it into an official prototype task. */
   prototype?: {
     assignees: string[]
@@ -61,6 +65,16 @@ export interface Answer {
   id: string
   submissionId: string
   author: string
+  text: string
+  createdAt: number
+}
+
+/** Someone's own highlight (no text) or note on a passage of the manual. */
+export interface ManualNoteDoc {
+  id: string
+  author: string
+  page: number
+  quote: string
   text: string
   createdAt: number
 }
@@ -129,6 +143,7 @@ export interface Collections {
   archetypes: Archetype
   responses: PrototypeResponse
   answers: Answer
+  notes: ManualNoteDoc
   meta: ManualMeta
   priorities: Priorities
 }

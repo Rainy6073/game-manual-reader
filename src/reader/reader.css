@@ -562,8 +562,48 @@ button.icon {
   position: fixed;
   z-index: 20;
   transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
   white-space: nowrap;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+.reference-pop button {
+  flex-shrink: 0;
+}
+
+.textLayer .highlight.marked {
+  --highlight-bg-color: rgb(255 214 0 / 0.42);
+  cursor: pointer;
+}
+.textLayer .highlight.note {
+  --highlight-bg-color: rgb(255 150 40 / 0.4);
+  border-bottom: 2px dotted rgb(200 90 0);
+  cursor: pointer;
+}
+
+.highlighter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.highlighter-toggle.on {
+  background: rgb(255 214 0 / 0.35);
+  border-color: rgb(200 160 0);
+  font-weight: 700;
+}
+.highlighter-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: rgb(255 214 0);
+  border: 1px solid rgb(180 140 0);
 }
 
 .password-card {

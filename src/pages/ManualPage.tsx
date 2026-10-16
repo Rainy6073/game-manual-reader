@@ -1,16 +1,20 @@
+import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Composer from '../components/Composer'
+import { AttachPicker, NoteEditor, NotesList, type NoteDraft } from '../components/ManualNotes'
 import QuestionBoard from '../components/QuestionBoard'
+import { ListEnd, Sortable } from '../components/Sortable'
+import { byRank, reorderOnDrop } from '../reorder'
 import SubmissionCard from '../components/SubmissionCard'
 import ManualReader, { type ManualRef, type ManualSource } from '../reader/ManualReader'
 import { isPasswordError, loadPdf } from '../reader/pdf'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useDoc, useFileUrl } from '../sync/store'
-import type { SubmissionKind } from '../types'
+import { newId, type SubmissionKind } from '../types'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
 
-type Filter = 'all' | SubmissionKind | 'mine'
+type Filter = 'all' | SubmissionKind | 'mine' | 'notes'
 
 const MIN_SIDE = 260
 /** Dragging the panel narrower than this collapses it. */
@@ -44,6 +48,25 @@ export default function ManualPage() {
   const manual = useDoc('meta', 'manual')
   const manualUrl = useFileUrl(manual?.url)
   const submissions = useCollection('submissions')
+  const allNotes = useCollection('notes')
+  // Highlights and notes are each person's own.
+  const myNotes = useMemo(
+    () => allNotes.filter((n) => n.author === name).sort((a, b) => b.createdAt - a.createdAt),
+    [allNotes, name],
+  )
+  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null)
+  const [attaching, setAttaching] = useState<ManualRef | null>(null)
+  const openNote = useCallback(
+    (id: string, at: { x: number; y: number }) => {
+      const note = myNotes.find((n) => n.id === id)
+      if (note) setNoteDraft({ note, at })
+    },
+    [myNotes],
+  )
+  const highlight = useCallback(
+    (ref: ManualRef) => put('notes', { id: newId(), author: name, page: ref.page, quote: ref.quote, text: '', createdAt: Date.now() }),
+    [name],
+  )
   const [reference, setReference] = useState<ManualRef | null>(null)
   const [jump, setJump] = useState<(ManualRef & { token: number }) | undefined>()
   const [filter, setFilter] = useState<Filter>(presenter ? 'all' : 'mine')
@@ -163,23 +186,33 @@ export default function ManualPage() {
   const shareSample = () =>
     put('meta', { id: 'manual', url: SAMPLE.url, name: SAMPLE.name, uploadedBy: name, uploadedAt: Date.now() })
 
-  const sorted = useMemo(() => [...submissions].sort((a, b) => b.createdAt - a.createdAt), [submissions])
-  const shown = sorted.filter((s) => (filter === 'all' ? true : filter === 'mine' ? s.author === name : s.kind === filter))
+  // Newest first, unless the presenter has dragged things into another order.
+  const sorted = useMemo(() => [...submissions].sort(byRank), [submissions])
+  const [dragging, setDragging] = useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } }),
+  )
+  const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
+  const shown = filter === 'notes' ? [] : sorted.filter((s) => (filter === 'all' ? true : filter === 'mine' ? s.author === name : s.kind === filter))
   const counts = {
     all: sorted.length,
     question: sorted.filter((s) => s.kind === 'question').length,
     idea: sorted.filter((s) => s.kind === 'idea').length,
     mine: sorted.filter((s) => s.author === name).length,
+    notes: myNotes.length,
   }
   const filters: { id: Filter; label: string }[] = presenter
     ? [
         { id: 'all', label: 'All' },
         { id: 'question', label: 'Questions' },
         { id: 'idea', label: 'Ideas' },
+        { id: 'notes', label: 'My notes' },
       ]
     : [
         { id: 'mine', label: 'Mine' },
         { id: 'all', label: 'Everyone' },
+        { id: 'notes', label: 'My notes' },
       ]
 
   const uploadButton = presenter && (
@@ -270,16 +303,28 @@ export default function ManualPage() {
                 ))}
               </div>
             </div>
+            <DndContext
+              sensors={sensors}
+              onDragStart={(e) => setDragging(String(e.active.id))}
+              onDragCancel={() => setDragging(null)}
+              onDragEnd={(e) => {
+                setDragging(null)
+                reorderOnDrop(sorted, e, () => 'feed')
+              }}
+            >
             <div className="feed">
-              {shown.length === 0 && (
+              {filter === 'notes' && <NotesList notes={myNotes} onJump={jumpTo} onEdit={(note, at) => setNoteDraft({ note, at })} />}
+              {filter !== 'notes' && shown.length === 0 && (
                 <p className="empty muted">
                   {filter === 'mine' ? 'Nothing sent yet. Your questions and ideas will show up here.' : 'No submissions yet.'}
                 </p>
               )}
               {shown.map((s) => (
+                <Sortable key={s.id} id={s.id} group="feed" enabled={presenter}>
+                  {(handle) => (
                 <SubmissionCard
-                  key={s.id}
                   submission={s}
+                  handle={handle}
                   onJump={jumpTo}
                   answerable
                   actions={
@@ -295,8 +340,13 @@ export default function ManualPage() {
                     )
                   }
                 />
+                  )}
+                </Sortable>
               ))}
+              <ListEnd group="feed" enabled={presenter && shown.length > 0} />
             </div>
+              <DragOverlay dropAnimation={null}>{dragged && <div className="sortable-lifted"><SubmissionCard submission={dragged} /></div>}</DragOverlay>
+            </DndContext>
           </>
         )}
       </section>
@@ -329,6 +379,11 @@ export default function ManualPage() {
           onReference={addReference}
           jump={jump}
           onPassword={savePassword}
+          notes={myNotes}
+          onNote={(ref, at) => setNoteDraft({ ref, at })}
+          onHighlight={highlight}
+          onAttach={setAttaching}
+          onOpenNote={openNote}
           empty={
             <div className="empty-manual">
               {manual && !manualUrl ? (
@@ -354,6 +409,9 @@ export default function ManualPage() {
         />
         {uploadError && manual && <div className="toast error-text">{uploadError}</div>}
       </section>
+
+      {noteDraft && <NoteEditor key={noteDraft.note?.id ?? 'new'} draft={noteDraft} author={name} onClose={() => setNoteDraft(null)} onAsk={addReference} />}
+      {attaching && <AttachPicker reference={attaching} submissions={submissions} onClose={() => setAttaching(null)} />}
 
       {pending && (
         <div className="modal-backdrop" onClick={() => !uploading && setPending(null)}>

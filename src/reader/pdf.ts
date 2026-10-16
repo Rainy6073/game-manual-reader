@@ -317,6 +317,8 @@ export interface HighlightSegment {
   selected: boolean
   /** Game-element highlights are styled differently from search matches. */
   element?: boolean
+  /** Someone's own highlight or note on this passage. */
+  note?: { id: string; hasText: boolean }
 }
 
 export interface SearchMatch {
@@ -335,6 +337,25 @@ function segmentsFor({ starts, lengths }: PageText, at: number, end: number): Se
     segments.push({ item: i, start: Math.max(at, s) - s, end: Math.min(end, e) - s })
   }
   return segments
+}
+
+/**
+ * Finds a passage someone selected on a page. Selected text and extracted text
+ * differ in spacing, so they are compared with all whitespace removed.
+ */
+export function findQuote(page: PageText, quote: string): SearchMatch['segments'] | null {
+  const chars: string[] = []
+  const at: number[] = []
+  for (let i = 0; i < page.text.length; i++) {
+    if (/\s/.test(page.text[i])) continue
+    chars.push(page.text[i])
+    at.push(i)
+  }
+  const needle = quote.toLowerCase().replace(/\s+/g, '')
+  if (!needle) return null
+  const found = chars.join('').indexOf(needle)
+  if (found === -1) return null
+  return segmentsFor(page, at[found], at[found + needle.length - 1] + 1)
 }
 
 /** Case-insensitive plain-text search across all pages. */

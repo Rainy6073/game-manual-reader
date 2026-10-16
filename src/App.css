@@ -850,6 +850,109 @@ body.resizing .manual-panel {
 :root[data-role='presenter'] .submission-text {
   font-size: 1.05rem;
 }
+.note-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+.note-pop {
+  position: fixed;
+  z-index: 30;
+  width: min(340px, calc(100vw - 16px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-top: 4px solid rgb(255 150 40);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.25);
+}
+.note-quote {
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.note-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.note-card {
+  border-left: 4px solid rgb(255 150 40);
+}
+.note-card.just-highlight {
+  border-left-color: rgb(255 214 0);
+}
+.attach-picker {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.attach-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attach-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 8px 10px;
+}
+.attach-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drag-handle {
+  padding: 0 4px;
+  margin: -2px 0 -2px -4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+.drag-handle:hover {
+  color: var(--accent);
+}
+.sortable {
+  border-radius: var(--radius);
+}
+.sortable.ghost {
+  opacity: 0.35;
+}
+.sortable.insert,
+.list-end.insert {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+.list-end {
+  min-height: 24px;
+  flex-shrink: 0;
+}
+.sortable-lifted {
+  width: 320px;
+  cursor: grabbing;
+}
+.sortable-lifted .submission {
+  box-shadow: 0 10px 30px rgb(60 0 0 / 0.22);
+  border-color: var(--accent);
+}
 .submission.answerable:not(.answering) {
   cursor: pointer;
 }

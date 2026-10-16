@@ -4,6 +4,7 @@ import {
   filterOutline,
   findElement,
   findGameElements,
+  findQuote,
   findRulesSection,
   getOutline,
   isPasswordError,
@@ -17,6 +18,7 @@ import {
   type PDFDoc,
   type SearchMatch,
 } from './pdf'
+import { useLocalState } from '../session'
 import { DESCRIPTION_ID, ruleAnchor, sectionAnchor } from './anchors'
 import FocusedView, { type FocusData } from './FocusedView'
 import PdfPage from './PdfPage'
@@ -41,6 +43,18 @@ export interface ManualRef {
   quote: string
 }
 
+/** A highlight or note shown on the manual's pages. */
+export interface ManualNote extends ManualRef {
+  id: string
+  text: string
+}
+
+/** Where on screen something happened, for placing a popover next to it. */
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
 export interface ManualSource {
   url: string
   name: string
@@ -59,9 +73,22 @@ interface Props {
   jump?: ManualRef & { token: number }
   /** Called when someone types the right password for an encrypted manual. */
   onPassword?: (password: string) => void
+  /** This person's highlights and notes, marked on the pages. */
+  notes?: ManualNote[]
+  /** Starts a note on selected text. */
+  onNote?: (ref: ManualRef, at: ScreenPoint) => void
+  /** Saves selected text as a plain highlight. */
+  onHighlight?: (ref: ManualRef) => void
+  /** Attaches selected text to an existing question or idea. */
+  onAttach?: (ref: ManualRef) => void
+  /** Called when someone clicks one of their highlights or notes. */
+  onOpenNote?: (id: string, at: ScreenPoint) => void
 }
 
-export default function ManualReader({ source, empty, actions, onReference, jump, onPassword }: Props) {
+export default function ManualReader({ source, empty, actions, onReference, jump, onPassword, notes, onNote, onHighlight, onAttach, onOpenNote }: Props) {
+  // With the highlighter on, selecting text simply highlights it.
+  const [highlighter, setHighlighter] = useLocalState('kickoff.highlighter', false)
+  const highlighting = highlighter && !!onHighlight
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -567,10 +594,15 @@ export default function ManualReader({ source, empty, actions, onReference, jump
   const highlightsByPage = useMemo(() => {
     const map = new Map<number, HighlightSegment[]>()
     const add = (page: number, segs: HighlightSegment[]) => map.set(page, [...(map.get(page) ?? []), ...segs])
+    for (const n of notes ?? []) {
+      const page = pagesText?.[n.page - 1]
+      const segs = page && findQuote(page, n.quote)
+      if (segs) add(n.page, segs.map((seg) => ({ ...seg, selected: false, note: { id: n.id, hasText: !!n.text.trim() } })))
+    }
     for (const m of elementMatches) add(m.page, m.segments.map((seg) => ({ ...seg, selected: false, element: true })))
     matches.forEach((m, i) => add(m.page, m.segments.map((seg) => ({ ...seg, selected: i === matchIndex }))))
     return map
-  }, [elementMatches, matches, matchIndex])
+  }, [elementMatches, matches, matchIndex, notes, pagesText])
 
   // --- References: jumping to one, and making one from selected text ---------
 
@@ -635,6 +667,55 @@ export default function ManualReader({ source, empty, actions, onReference, jump
       viewer?.removeEventListener('scroll', update)
     }
   }, [onReference, loaded])
+
+  // Keep the selection popup on screen, however wide it ends up.
+  const popRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = popRef.current
+    if (!el || !selection) return
+    const half = el.offsetWidth / 2
+    el.style.left = `${Math.min(Math.max(selection.x, half + 8), window.innerWidth - half - 8)}px`
+  }, [selection])
+
+  const takeSelection = () => {
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+  }
+
+  // Highlighter with a mouse: letting go of the button highlights what was selected.
+  // (Touch selections are adjusted with handles, so they get a Highlight button instead.)
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!highlighting || !viewer) return
+    const up = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return
+      setTimeout(() => {
+        const sel = window.getSelection()
+        const quote = sel?.toString().replace(/\s+/g, ' ').trim()
+        const node = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement
+        const pageEl = node?.closest<HTMLElement>('[data-page]')
+        if (!sel || sel.isCollapsed || !quote || !pageEl || !viewer.contains(pageEl)) return
+        onHighlight?.({ page: Number(pageEl.dataset.page), quote })
+        takeSelection()
+      })
+    }
+    viewer.addEventListener('pointerup', up)
+    return () => viewer.removeEventListener('pointerup', up)
+  }, [highlighting, onHighlight, loaded])
+
+  // Clicking one of your highlights or notes opens it.
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!onOpenNote || !viewer) return
+    const click = (e: MouseEvent) => {
+      const mark = (e.target as HTMLElement).closest<HTMLElement>('[data-note]')
+      if (!mark || !window.getSelection()?.isCollapsed) return
+      const rect = mark.getBoundingClientRect()
+      onOpenNote(mark.dataset.note!, { x: rect.left + rect.width / 2, y: rect.bottom + 8 })
+    }
+    viewer.addEventListener('click', click)
+    return () => viewer.removeEventListener('click', click)
+  }, [onOpenNote, loaded])
 
   // --- Keyboard shortcuts --------------------------------------------------
 
@@ -738,6 +819,16 @@ export default function ManualReader({ source, empty, actions, onReference, jump
           </div>
         )}
 
+        {loaded && onHighlight && (
+          <button
+            className={`highlighter-toggle${highlighter ? ' on' : ''}`}
+            aria-pressed={highlighter}
+            onClick={() => setHighlighter((h) => !h)}
+            title={highlighter ? 'Highlighter on: selecting text highlights it' : 'Turn on the highlighter to just highlight text as you select it'}
+          >
+            <span className="highlighter-swatch" aria-hidden /> Highlighter
+          </button>
+        )}
         {actions && <div className="actions">{actions}</div>}
       </header>
 
@@ -850,20 +941,69 @@ export default function ManualReader({ source, empty, actions, onReference, jump
       </div>
 
       {selection && onReference && (
-        <button
-          className="reference-pop primary"
+        <div
+          ref={popRef}
+          className="reference-pop"
           style={{ left: selection.x, top: selection.y }}
-          // Keep the text selected while the button is pressed.
+          // Keep the text selected while a button is pressed.
           onPointerDown={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            onReference({ page: selection.page, quote: selection.quote })
-            window.getSelection()?.removeAllRanges()
-            setSelection(null)
-          }}
         >
-          ＋ Reference in question / idea
-        </button>
+          {highlighting ? (
+            <button
+              className="primary"
+              onClick={() => {
+                onHighlight?.({ page: selection.page, quote: selection.quote })
+                takeSelection()
+              }}
+            >
+              🖍 Highlight
+            </button>
+          ) : (
+            <>
+              {onHighlight && (
+                <button
+                  onClick={() => {
+                    onHighlight({ page: selection.page, quote: selection.quote })
+                    takeSelection()
+                  }}
+                  title="Highlight this passage"
+                >
+                  🖍 Highlight
+                </button>
+              )}
+              {onNote && (
+                <button
+                  onClick={() => {
+                    onNote({ page: selection.page, quote: selection.quote }, { x: selection.x, y: selection.y })
+                    takeSelection()
+                  }}
+                >
+                  ✎ Note
+                </button>
+              )}
+              <button
+                className="primary"
+                onClick={() => {
+                  onReference({ page: selection.page, quote: selection.quote })
+                  takeSelection()
+                }}
+              >
+                ＋ New question / idea
+              </button>
+              {onAttach && (
+                <button
+                  onClick={() => {
+                    onAttach({ page: selection.page, quote: selection.quote })
+                    takeSelection()
+                  }}
+                >
+                  Add to a question…
+                </button>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   )

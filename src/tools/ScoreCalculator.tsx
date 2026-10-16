@@ -192,9 +192,23 @@ export default function ScoreCalculator() {
             </button>
           )}
           <button onClick={() => setTeams((ts) => ts.map((t) => ({ ...t, counts: {}, checked: {} })))}>Clear counts</button>
+          {defaultTeams()
+            .filter((d) => !teams.some((t) => t.color === d.color))
+            .map((d) => (
+              // Red and blue come back in their usual place: red first, blue after it.
+              <button
+                key={d.id}
+                className={`robot-btn ${d.color}`}
+                onClick={() =>
+                  setTeams((ts) => (d.color === 'red' ? [{ ...d, id: newRowId() }, ...ts] : [...ts.filter((t) => t.color === 'red'), { ...d, id: newRowId() }, ...ts.filter((t) => t.color !== 'red')]))
+                }
+              >
+                + {d.name}
+              </button>
+            ))}
           <button
             onClick={() =>
-              setTeams((ts) => [...ts, { id: newRowId(), name: `Team ${ts.length + 1}`, color: 'gray', counts: {}, checked: {} }])
+              setTeams((ts) => [...ts, { id: newRowId(), name: `Team ${ts.filter((t) => t.color === 'gray').length + 1}`, color: 'gray', counts: {}, checked: {} }])
             }
           >
             + Team

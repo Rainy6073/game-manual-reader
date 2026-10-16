@@ -12,9 +12,11 @@ interface Props {
   actions?: ReactNode
   /** Questions show their answers, and clicking one opens a box to answer it. */
   answerable?: boolean
+  /** A drag handle for reordering, shown at the start of the header. */
+  handle?: ReactNode
 }
 
-export default function SubmissionCard({ submission: s, onJump, actions, answerable }: Props) {
+export default function SubmissionCard({ submission: s, onJump, actions, answerable, handle }: Props) {
   const canAnswer = answerable && s.kind === 'question'
   const [answering, setAnswering] = useState(false)
 
@@ -28,6 +30,7 @@ export default function SubmissionCard({ submission: s, onJump, actions, answera
       }}
     >
       <header>
+        {handle}
         <span className={`kind-badge ${s.kind}`}>{s.kind === 'question' ? 'Question' : 'Idea'}</span>
         {s.prototype && <span className="kind-badge proto">Prototype</span>}
         <span className="muted byline">
@@ -35,7 +38,9 @@ export default function SubmissionCard({ submission: s, onJump, actions, answera
         </span>
       </header>
       <p className="submission-text">{s.text}</p>
-      {s.ref && <RefChip reference={s.ref} onClick={onJump && (() => onJump(s.ref!))} />}
+      {[...(s.ref ? [s.ref] : []), ...(s.refs ?? [])].map((r, i) => (
+        <RefChip key={i} reference={r} onClick={onJump && (() => onJump(r))} />
+      ))}
       {canAnswer && <Answers submissionId={s.id} answering={answering} onDone={() => setAnswering(false)} />}
       {(actions || (canAnswer && !answering)) && (
         <footer className="submission-actions">
