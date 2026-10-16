@@ -558,23 +558,82 @@ button.icon {
   color: #d33;
 }
 
-.reference-pop {
-  position: fixed;
+.selection-bar {
+  position: absolute;
   z-index: 20;
+  top: 8px;
+  left: 50%;
   transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: 4px;
   padding: 4px;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100% - 16px);
   overflow-x: auto;
   white-space: nowrap;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
 }
-.reference-pop button {
+.selection-bar button {
   flex-shrink: 0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+}
+.selection-bar .swatch-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 2px;
+  border-radius: 3px;
+  background: rgb(255 214 0);
+  border: 1px solid rgb(180 140 0);
+}
+
+/* Notes in the margin beside each page; the pages move left to make room. */
+.page-aside {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: calc(100% + 14px);
+  width: 230px;
+  height: 100%;
+  pointer-events: none;
+}
+.aside-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: auto;
+  text-align: left;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  padding: 7px 10px;
+  color: var(--text);
+  background: #fff8ec;
+  border: 1px solid rgb(240 190 120);
+  border-left: 4px solid rgb(255 150 40);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.aside-note:hover {
+  border-color: rgb(220 120 20);
+}
+.viewer.with-notes > .page {
+  margin-right: 250px;
+}
+.viewer.with-notes .page-aside {
+  display: block;
 }
 
 .textLayer .highlight.marked {
@@ -587,24 +646,6 @@ button.icon {
   cursor: pointer;
 }
 
-.highlighter-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.highlighter-toggle.on {
-  background: rgb(255 214 0 / 0.35);
-  border-color: rgb(200 160 0);
-  font-weight: 700;
-}
-.highlighter-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  background: rgb(255 214 0);
-  border: 1px solid rgb(180 140 0);
-}
 
 .password-card {
   max-width: 360px;

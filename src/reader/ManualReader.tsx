@@ -18,7 +18,6 @@ import {
   type PDFDoc,
   type SearchMatch,
 } from './pdf'
-import { useLocalState } from '../session'
 import { DESCRIPTION_ID, ruleAnchor, sectionAnchor } from './anchors'
 import FocusedView, { type FocusData } from './FocusedView'
 import PdfPage from './PdfPage'
@@ -28,6 +27,8 @@ import { blocksText, extractRules, extractSection } from './structure'
 import './reader.css'
 const MIN_SCALE = 0.4
 const MAX_SCALE = 4
+/** Room kept beside the pages for margin notes. */
+const MARGIN = 250
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
 
 interface Loaded {
@@ -86,9 +87,6 @@ interface Props {
 }
 
 export default function ManualReader({ source, empty, actions, onReference, jump, onPassword, notes, onNote, onHighlight, onAttach, onOpenNote }: Props) {
-  // With the highlighter on, selecting text simply highlights it.
-  const [highlighter, setHighlighter] = useLocalState('kickoff.highlighter', false)
-  const highlighting = highlighter && !!onHighlight
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -179,13 +177,34 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     }
   }
 
+  // Notes with text are also shown in the margin beside their page.
+  const notesByPage = useMemo(() => {
+    const map = new Map<number, { id: string; text: string }[]>()
+    for (const n of notes ?? []) if (n.text.trim()) map.set(n.page, [...(map.get(n.page) ?? []), { id: n.id, text: n.text }])
+    return map
+  }, [notes])
+  const [viewerWidth, setViewerWidth] = useState(0)
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    setViewerWidth(viewer.clientWidth)
+    const observer = new ResizeObserver(() => setViewerWidth(viewer.clientWidth))
+    observer.observe(viewer)
+    return () => observer.disconnect()
+  }, [loaded])
+  // The margin needs room for both a readable page and the notes beside it.
+  const withMargin = notesByPage.size > 0 && !focused && viewerWidth >= 560
+  const withMarginRef = useRef(withMargin)
+  withMarginRef.current = withMargin
+
   // Fit the page width to the viewer once a document loads. If the viewer is
   // hidden at that moment (e.g. behind the Question Board), fit when it appears.
   useEffect(() => {
     const viewer = viewerRef.current
     if (!loaded || !viewer) return
+    autoFitRef.current = true
     const fit = () => {
-      const available = viewer.clientWidth - 48
+      const available = viewer.clientWidth - 48 - (withMarginRef.current ? MARGIN : 0)
       if (available <= 0) return false
       const widest = Math.max(...loaded.sizes.map((s) => s.width))
       setScale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
@@ -196,6 +215,22 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     observer.observe(viewer)
     return () => observer.disconnect()
   }, [loaded])
+
+  // Until someone zooms by hand, keep the pages fitted to the room they have
+  // (beside the margin notes, when there are any). Waits for resizing to settle.
+  const autoFitRef = useRef(true)
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!loaded || !viewer || !viewerWidth) return
+    const t = setTimeout(() => {
+      const widest = Math.max(...loaded.sizes.map((s) => s.width))
+      const available = viewer.clientWidth - 48 - (withMargin ? MARGIN : 0)
+      const fitted = Math.min(1.5, Math.max(MIN_SCALE, available / widest))
+      // Zoomed by hand: only shrink if the page no longer fits beside the notes.
+      if (autoFitRef.current ? Math.abs(fitted - scaleRef.current) > 0.01 : withMargin && widest * scaleRef.current > available) setScale(fitted)
+    }, 200)
+    return () => clearTimeout(t)
+  }, [withMargin, loaded, viewerWidth])
 
   // --- Text index & game elements -----------------------------------------
 
@@ -390,6 +425,7 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     const viewer = viewerRef.current
     const clamped = clampScale(next)
     if (!viewer || clamped === scaleRef.current) return
+    autoFitRef.current = false
     const rect = viewer.getBoundingClientRect()
     const x = (clientX ?? rect.left + rect.width / 2) - rect.left
     const y = (clientY ?? rect.top + rect.height / 2) - rect.top
@@ -668,40 +704,30 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     }
   }, [onReference, loaded])
 
-  // Keep the selection popup on screen, however wide it ends up.
-  const popRef = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const el = popRef.current
-    if (!el || !selection) return
-    const half = el.offsetWidth / 2
-    el.style.left = `${Math.min(Math.max(selection.x, half + 8), window.innerWidth - half - 8)}px`
-  }, [selection])
 
   const takeSelection = () => {
     window.getSelection()?.removeAllRanges()
     setSelection(null)
   }
 
-  // Highlighter with a mouse: letting go of the button highlights what was selected.
-  // (Touch selections are adjusted with handles, so they get a Highlight button instead.)
+  // With text selected, H highlights it, N starts a note and Q a question.
   useEffect(() => {
-    const viewer = viewerRef.current
-    if (!highlighting || !viewer) return
-    const up = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return
-      setTimeout(() => {
-        const sel = window.getSelection()
-        const quote = sel?.toString().replace(/\s+/g, ' ').trim()
-        const node = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement
-        const pageEl = node?.closest<HTMLElement>('[data-page]')
-        if (!sel || sel.isCollapsed || !quote || !pageEl || !viewer.contains(pageEl)) return
-        onHighlight?.({ page: Number(pageEl.dataset.page), quote })
-        takeSelection()
-      })
+    if (!selection) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest('input, textarea, select')) return
+      const ref = { page: selection.page, quote: selection.quote }
+      const key = e.key.toLowerCase()
+      if (key === 'h' && onHighlight) onHighlight(ref)
+      else if (key === 'n' && onNote) onNote(ref, { x: selection.x, y: selection.y })
+      else if (key === 'q' && onReference) onReference(ref)
+      else return
+      e.preventDefault()
+      takeSelection()
     }
-    viewer.addEventListener('pointerup', up)
-    return () => viewer.removeEventListener('pointerup', up)
-  }, [highlighting, onHighlight, loaded])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, onHighlight, onNote, onReference])
 
   // Clicking one of your highlights or notes opens it.
   useEffect(() => {
@@ -819,20 +845,66 @@ export default function ManualReader({ source, empty, actions, onReference, jump
           </div>
         )}
 
-        {loaded && onHighlight && (
-          <button
-            className={`highlighter-toggle${highlighter ? ' on' : ''}`}
-            aria-pressed={highlighter}
-            onClick={() => setHighlighter((h) => !h)}
-            title={highlighter ? 'Highlighter on: selecting text highlights it' : 'Turn on the highlighter to just highlight text as you select it'}
-          >
-            <span className="highlighter-swatch" aria-hidden /> Highlighter
-          </button>
-        )}
         {actions && <div className="actions">{actions}</div>}
       </header>
 
       <div className="body">
+        {selection && onReference && (
+          // One slim bar at the top of the page view, so selections aren't covered by buttons.
+          <div
+            className="selection-bar"
+            // Keep the text selected while a button is pressed.
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {onHighlight && (
+              <button
+                onClick={() => {
+                  onHighlight({ page: selection.page, quote: selection.quote })
+                  takeSelection()
+                }}
+                title="Highlight (H)"
+              >
+                <span className="swatch-dot" aria-hidden /> Highlight
+              </button>
+            )}
+            {onNote && (
+              <button
+                onClick={() => {
+                  onNote({ page: selection.page, quote: selection.quote }, { x: selection.x, y: selection.y })
+                  takeSelection()
+                }}
+                title="Add a note (N)"
+              >
+                ✎ Note
+              </button>
+            )}
+            <button
+              onClick={() => {
+                onReference({ page: selection.page, quote: selection.quote })
+                takeSelection()
+              }}
+              title="Ask a question or suggest an idea about this (Q)"
+            >
+              ＋ Question / idea
+            </button>
+            {onAttach && (
+              <button
+                onClick={() => {
+                  onAttach({ page: selection.page, quote: selection.quote })
+                  takeSelection()
+                }}
+                title="Attach this passage to a question or idea that already exists"
+              >
+                Add to question…
+              </button>
+            )}
+            <button className="icon ghost" onClick={takeSelection} aria-label="Clear selection" title="Clear selection">
+              ✕
+            </button>
+          </div>
+        )}
+
         {sidebarOpen && loaded && (
           <Sidebar
             outline={focused ? focusOutline : shownOutline}
@@ -860,7 +932,7 @@ export default function ManualReader({ source, empty, actions, onReference, jump
           />
         )}
 
-        <main className="viewer" ref={viewerRef}>
+        <main className={`viewer${withMargin ? ' with-notes' : ''}`} ref={viewerRef}>
           {!source && empty}
           {error && <div className="banner error">{error}</div>}
           {loading && <div className="banner">Loading manual…</div>}
@@ -935,76 +1007,13 @@ export default function ManualReader({ source, empty, actions, onReference, jump
                 highlights={highlightsByPage.get(page)}
                 scrollRequest={matches[matchIndex]?.page === page ? scrollRequest : undefined}
                 flash={flash?.page === page ? flash : undefined}
+                asides={notesByPage.get(page)}
+                onAside={onOpenNote && ((id, rect) => onOpenNote(id, { x: rect.left + rect.width / 2, y: rect.bottom + 8 }))}
               />
             ))}
         </main>
       </div>
 
-      {selection && onReference && (
-        <div
-          ref={popRef}
-          className="reference-pop"
-          style={{ left: selection.x, top: selection.y }}
-          // Keep the text selected while a button is pressed.
-          onPointerDown={(e) => e.preventDefault()}
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {highlighting ? (
-            <button
-              className="primary"
-              onClick={() => {
-                onHighlight?.({ page: selection.page, quote: selection.quote })
-                takeSelection()
-              }}
-            >
-              🖍 Highlight
-            </button>
-          ) : (
-            <>
-              {onHighlight && (
-                <button
-                  onClick={() => {
-                    onHighlight({ page: selection.page, quote: selection.quote })
-                    takeSelection()
-                  }}
-                  title="Highlight this passage"
-                >
-                  🖍 Highlight
-                </button>
-              )}
-              {onNote && (
-                <button
-                  onClick={() => {
-                    onNote({ page: selection.page, quote: selection.quote }, { x: selection.x, y: selection.y })
-                    takeSelection()
-                  }}
-                >
-                  ✎ Note
-                </button>
-              )}
-              <button
-                className="primary"
-                onClick={() => {
-                  onReference({ page: selection.page, quote: selection.quote })
-                  takeSelection()
-                }}
-              >
-                ＋ New question / idea
-              </button>
-              {onAttach && (
-                <button
-                  onClick={() => {
-                    onAttach({ page: selection.page, quote: selection.quote })
-                    takeSelection()
-                  }}
-                >
-                  Add to a question…
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }

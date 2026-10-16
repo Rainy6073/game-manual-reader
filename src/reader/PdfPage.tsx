@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { pdfjs, type HighlightSegment, type PDFDoc } from './pdf'
 
 interface Props {
@@ -12,11 +12,17 @@ interface Props {
   scrollRequest?: number
   /** Briefly marks a spot on the page (PDF-space y); a new token replays it. */
   flash?: { y: number; token: number }
+  /** Notes shown in the margin beside the page, next to their highlighted text. */
+  asides?: { id: string; text: string }[]
+  onAside?: (id: string, rect: DOMRect) => void
 }
 
 const EMPTY: HighlightSegment[] = []
 
-export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights = EMPTY, scrollRequest = 0, flash }: Props) {
+export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights = EMPTY, scrollRequest = 0, flash, asides, onAside }: Props) {
+  // Where each margin note's highlight sits on the page, in pixels from the top.
+  const [asideTops, setAsideTops] = useState<Map<string, number>>(new Map())
+  const asideRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
@@ -134,6 +140,18 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
       div.replaceChildren(...nodes)
     }
 
+    // Find where each note's text is, for its card in the margin.
+    const wrapper = wrapperRef.current
+    if (wrapper) {
+      const top = wrapper.getBoundingClientRect().top
+      const tops = new Map<string, number>()
+      for (const mark of textRef.current?.querySelectorAll<HTMLElement>('[data-note]') ?? []) {
+        const id = mark.dataset.note!
+        if (!tops.has(id)) tops.set(id, mark.getBoundingClientRect().top - top)
+      }
+      setAsideTops(tops)
+    }
+
     if (scrollRequest !== handledScrollRef.current) {
       const selected = textRef.current?.querySelector('.highlight.selected')
       if (selected) {
@@ -151,6 +169,17 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
 
   const width = baseSize.width * scale
   const height = baseSize.height * scale
+
+  // Margin notes sit beside their text, pushed down so they never overlap.
+  const shownAsides = (asides ?? []).filter((a) => asideTops.has(a.id)).sort((a, b) => asideTops.get(a.id)! - asideTops.get(b.id)!)
+  useLayoutEffect(() => {
+    let bottom = -Infinity
+    for (const card of asideRef.current?.querySelectorAll<HTMLElement>('[data-aside]') ?? []) {
+      const top = Math.max(asideTops.get(card.dataset.aside!) ?? 0, bottom + 8)
+      card.style.top = `${top}px`
+      bottom = top + card.offsetHeight
+    }
+  })
 
   return (
     <div
@@ -172,6 +201,15 @@ export default function PdfPage({ doc, pageNumber, scale, baseSize, highlights =
           <div ref={canvasHostRef} className="canvas-host" />
           <div ref={textRef} className="text-host" />
         </>
+      )}
+      {shownAsides.length > 0 && (
+        <div className="page-aside" ref={asideRef}>
+          {shownAsides.map((a) => (
+            <button key={a.id} data-aside={a.id} className="aside-note" onClick={(e) => onAside?.(a.id, e.currentTarget.getBoundingClientRect())} title="Edit note">
+              {a.text}
+            </button>
+          ))}
+        </div>
       )}
       {flash && (
         <div

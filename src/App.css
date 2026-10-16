@@ -917,19 +917,59 @@ body.resizing .manual-panel {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.drag-handle {
-  padding: 0 4px;
-  margin: -2px 0 -2px -4px;
-  border: none;
-  background: none;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1;
+.submission header.grip {
+  /* The whole top row of a card (stretched to the card's edges) drags it. */
+  margin: -12px -12px 0;
+  padding: 10px 12px 4px;
+  border-radius: var(--radius) var(--radius) 0 0;
   cursor: grab;
-  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.drag-handle:hover {
-  color: var(--accent);
+.submission header.grip:hover {
+  background: var(--surface);
+}
+.submission header.grip:active {
+  cursor: grabbing;
+}
+.grip-dots {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.feed.drop-over,
+.board-column.drop-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+.group-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+}
+.group-name:hover,
+.group-name:focus {
+  border-color: var(--border);
+  background: var(--bg);
+}
+.board-column.new-group {
+  flex: 0 0 260px;
+  min-width: 0;
+  align-self: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-style: dashed;
+  border-top: 4px dashed var(--border);
+  background: transparent;
+}
+.board-column.new-group h3 {
+  font-size: 1.4rem;
 }
 .sortable {
   border-radius: var(--radius);
@@ -937,13 +977,8 @@ body.resizing .manual-panel {
 .sortable.ghost {
   opacity: 0.35;
 }
-.sortable.insert,
-.list-end.insert {
+.sortable.insert {
   box-shadow: 0 -3px 0 var(--accent);
-}
-.list-end {
-  min-height: 24px;
-  flex-shrink: 0;
 }
 .sortable-lifted {
   width: 320px;

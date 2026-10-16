@@ -1,10 +1,10 @@
-import { DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { DndContext, DragOverlay } from '@dnd-kit/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Composer from '../components/Composer'
 import { AttachPicker, NoteEditor, NotesList, type NoteDraft } from '../components/ManualNotes'
 import QuestionBoard from '../components/QuestionBoard'
-import { ListEnd, Sortable } from '../components/Sortable'
-import { byRank, reorderOnDrop } from '../reorder'
+import { DropList, Sortable } from '../components/Sortable'
+import { byRank, cardsFirst, reorderOnDrop, useCardSensors } from '../reorder'
 import SubmissionCard from '../components/SubmissionCard'
 import ManualReader, { type ManualRef, type ManualSource } from '../reader/ManualReader'
 import { isPasswordError, loadPdf } from '../reader/pdf'
@@ -186,13 +186,10 @@ export default function ManualPage() {
   const shareSample = () =>
     put('meta', { id: 'manual', url: SAMPLE.url, name: SAMPLE.name, uploadedBy: name, uploadedAt: Date.now() })
 
-  // Newest first, unless the presenter has dragged things into another order.
+  // Newest first, unless someone has dragged things into another order (shared by everyone).
   const sorted = useMemo(() => [...submissions].sort(byRank), [submissions])
   const [dragging, setDragging] = useState<string | null>(null)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } }),
-  )
+  const sensors = useCardSensors()
   const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
   const shown = filter === 'notes' ? [] : sorted.filter((s) => (filter === 'all' ? true : filter === 'mine' ? s.author === name : s.kind === filter))
   const counts = {
@@ -305,6 +302,7 @@ export default function ManualPage() {
             </div>
             <DndContext
               sensors={sensors}
+              collisionDetection={cardsFirst}
               onDragStart={(e) => setDragging(String(e.active.id))}
               onDragCancel={() => setDragging(null)}
               onDragEnd={(e) => {
@@ -312,7 +310,7 @@ export default function ManualPage() {
                 reorderOnDrop(sorted, e, () => 'feed')
               }}
             >
-            <div className="feed">
+            <DropList group="feed" enabled={filter !== 'notes'} className="feed">
               {filter === 'notes' && <NotesList notes={myNotes} onJump={jumpTo} onEdit={(note, at) => setNoteDraft({ note, at })} />}
               {filter !== 'notes' && shown.length === 0 && (
                 <p className="empty muted">
@@ -320,11 +318,11 @@ export default function ManualPage() {
                 </p>
               )}
               {shown.map((s) => (
-                <Sortable key={s.id} id={s.id} group="feed" enabled={presenter}>
-                  {(handle) => (
+                <Sortable key={s.id} id={s.id} group="feed" enabled>
+                  {(grip) => (
                 <SubmissionCard
                   submission={s}
-                  handle={handle}
+                  grip={grip}
                   onJump={jumpTo}
                   answerable
                   actions={
@@ -343,8 +341,7 @@ export default function ManualPage() {
                   )}
                 </Sortable>
               ))}
-              <ListEnd group="feed" enabled={presenter && shown.length > 0} />
-            </div>
+            </DropList>
               <DragOverlay dropAnimation={null}>{dragged && <div className="sortable-lifted"><SubmissionCard submission={dragged} /></div>}</DragOverlay>
             </DndContext>
           </>

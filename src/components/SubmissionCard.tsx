@@ -5,6 +5,7 @@ import { useIsPresenter, useSession } from '../session'
 import { put, remove, useCollection } from '../sync/store'
 import { newId, type Submission } from '../types'
 import RefChip from './RefChip'
+import type { DragGrip } from './Sortable'
 
 interface Props {
   submission: Submission
@@ -12,11 +13,11 @@ interface Props {
   actions?: ReactNode
   /** Questions show their answers, and clicking one opens a box to answer it. */
   answerable?: boolean
-  /** A drag handle for reordering, shown at the start of the header. */
-  handle?: ReactNode
+  /** Makes the card's top row drag the card. */
+  grip?: DragGrip | null
 }
 
-export default function SubmissionCard({ submission: s, onJump, actions, answerable, handle }: Props) {
+export default function SubmissionCard({ submission: s, onJump, actions, answerable, grip }: Props) {
   const canAnswer = answerable && s.kind === 'question'
   const [answering, setAnswering] = useState(false)
 
@@ -29,8 +30,12 @@ export default function SubmissionCard({ submission: s, onJump, actions, answera
         setAnswering(true)
       }}
     >
-      <header>
-        {handle}
+      <header ref={grip?.ref} {...grip?.props} className={grip ? 'grip' : undefined} title={grip ? 'Drag to move' : undefined}>
+        {grip && (
+          <span className="grip-dots" aria-hidden>
+            ⠿
+          </span>
+        )}
         <span className={`kind-badge ${s.kind}`}>{s.kind === 'question' ? 'Question' : 'Idea'}</span>
         {s.prototype && <span className="kind-badge proto">Prototype</span>}
         <span className="muted byline">

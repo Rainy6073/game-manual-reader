@@ -17,8 +17,10 @@ export interface Submission {
   ref?: ManualRef
   /** More passages attached later from the manual. */
   refs?: ManualRef[]
-  /** Position in the hand-arranged order (see components/reorder.tsx). */
+  /** Position in the hand-arranged order (see reorder.ts). */
   order?: number
+  /** The Question Board group it was sorted into, if any. */
+  groupId?: string
   /** Set once the presenter turns it into an official prototype task. */
   prototype?: {
     assignees: string[]
@@ -76,6 +78,13 @@ export interface ManualNoteDoc {
   page: number
   quote: string
   text: string
+  createdAt: number
+}
+
+/** A group people made on the Question Board to collect similar questions and ideas. */
+export interface BoardGroup {
+  id: string
+  name: string
   createdAt: number
 }
 
@@ -144,6 +153,7 @@ export interface Collections {
   responses: PrototypeResponse
   answers: Answer
   notes: ManualNoteDoc
+  groups: BoardGroup
   meta: ManualMeta
   priorities: Priorities
 }
