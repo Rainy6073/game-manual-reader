@@ -35,7 +35,7 @@ export default function Welcome({ onStart }: { onStart: (s: Session) => void }) 
       >
         <div className="welcome-head">
           <span className="logo-mark big" aria-hidden>
-            K
+            k.o.
           </span>
           <div>
             <h1>Kick-Office</h1>

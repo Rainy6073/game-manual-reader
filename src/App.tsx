@@ -75,7 +75,7 @@ export default function App() {
           <header className="topbar">
             <button className="logo" onClick={() => setSession(null)} title="Back to the start screen">
               <span className="logo-mark" aria-hidden>
-                K
+                k.o.
               </span>
               <span className="logo-text">Kick-Office</span>
             </button>
