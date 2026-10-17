@@ -126,6 +126,19 @@ export default function ArchetypesPage() {
       order: (columns.at(-1) ? rankOf(columns.at(-1)!) : 0) + 1000,
     })
 
+  /** Copies an archetype (with its abilities) and puts the copy just after it. */
+  const duplicate = (a: Archetype) => {
+    const next = columns[columns.indexOf(a) + 1]
+    board.save({
+      ...a,
+      id: newId(),
+      name: `${a.name} copy`,
+      items: a.items.map((i) => ({ ...i, key: newId() })),
+      createdAt: Date.now(),
+      order: next ? (rankOf(a) + rankOf(next)) / 2 : rankOf(a) + 1000,
+    })
+  }
+
   // Dragging an archetype by its grip moves the whole column; the others slide aside.
   const [movingColumn, setMovingColumn] = useState<string | null>(null)
   const moveColumn = (id: string, overId: string) => {
@@ -215,7 +228,7 @@ export default function ArchetypesPage() {
           <div className="columns">
             <SortableContext items={columns.map((a) => ARCH + a.id)} strategy={horizontalListSortingStrategy}>
               {columns.map((a) => (
-                <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} cards={live.items(a.id)} />
+                <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} cards={live.items(a.id)} onDuplicate={() => duplicate(a)} />
               ))}
             </SortableContext>
             {columns.length === 0 && (
@@ -298,9 +311,10 @@ interface ColumnProps {
   board: Board
   /** Its cards' drag ids, in the order shown (rearranged while dragging). */
   cards: string[]
+  onDuplicate: () => void
 }
 
-function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
+function Column({ archetype, byId, abilities, board, cards, onDuplicate }: ColumnProps) {
   const sort = useSortable({ id: ARCH + archetype.id, disabled: !board.editable })
   const items = archetype.items.filter((i) => byId.has(i.abilityId))
   const total = (k: 'effort' | 'value') => items.reduce((sum, i) => sum + (byId.get(i.abilityId)?.[k] ?? 0), 0)
@@ -340,6 +354,11 @@ function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
           />
         ) : (
           <h3>{archetype.name}</h3>
+        )}
+        {board.editable && (
+          <button className="icon ghost" onClick={onDuplicate} aria-label={`Duplicate ${archetype.name}`} title="Duplicate this archetype">
+            ⧉
+          </button>
         )}
         {board.editable && (
           <ConfirmButton className="icon ghost" aria-label={`Delete ${archetype.name}`} onConfirm={() => board.remove(archetype.id)} confirmLabel="✕">

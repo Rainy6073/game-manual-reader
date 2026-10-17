@@ -1,7 +1,7 @@
 import { DndContext, DragOverlay } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ConfirmButton from '../components/ConfirmButton'
 import FibInput from '../components/FibInput'
 import ScatterChart from '../components/ScatterChart'
@@ -19,6 +19,10 @@ const QUEUE_MAX = 3
 const rankOf = (a: Ability) => a.order ?? a.createdAt
 const ratio = (a: Ability) => formatRatio(valuePerEffort(a.effort, a.value))
 const ratioClass = (a: Ability) => `ratio ${ratioTone(valuePerEffort(a.effort, a.value))}`
+
+/** An ability's ratings at some moment, for undo. */
+type Rating = { id: string; effort: number | null; value: number | null }
+const UNDO_LIMIT = 100
 
 const rating = (e: number | null, v: number | null) => (e == null || v == null ? 'not rated' : `E${e} · V${v}`)
 
@@ -80,6 +84,54 @@ export default function EffortValuePage() {
     setName('')
   }
 
+  // Rating changes (chart drags, the number boxes, confirmed suggestions) can be
+  // undone with ⌘Z / Ctrl+Z and redone with ⇧⌘Z / Ctrl+Y. Kept for this visit.
+  const undoRef = useRef<Rating[][]>([])
+  const redoRef = useRef<Rating[][]>([])
+  const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 })
+  const syncHistory = () => setHistorySize({ undo: undoRef.current.length, redo: redoRef.current.length })
+  const snapshot = (ids: string[]): Rating[] =>
+    ids.flatMap((id) => {
+      const a = byId.get(id)
+      return a ? [{ id, effort: a.effort, value: a.value }] : []
+    })
+  const applyRatings = (ratings: Rating[]) => ratings.forEach((r) => byId.has(r.id) && patch('abilities', r.id, { effort: r.effort, value: r.value }))
+  /** Changes ratings, remembering the old ones for undo. */
+  const rate = (ratings: Rating[]) => {
+    const before = snapshot(ratings.map((r) => r.id))
+    if (before.every((b, i) => b.effort === ratings[i]?.effort && b.value === ratings[i]?.value)) return
+    undoRef.current = [...undoRef.current.slice(-UNDO_LIMIT + 1), before]
+    redoRef.current = []
+    applyRatings(ratings)
+    syncHistory()
+  }
+  const step = (from: typeof undoRef, to: typeof undoRef) => {
+    const ratings = from.current.pop()
+    if (!ratings) return
+    to.current.push(snapshot(ratings.map((r) => r.id)))
+    applyRatings(ratings)
+    syncHistory()
+  }
+  const undo = () => step(undoRef, redoRef)
+  const redo = () => step(redoRef, undoRef)
+  useEffect(() => {
+    if (!presenter) return
+    const onKey = (e: KeyboardEvent) => {
+      // Typing in a box keeps the box's own undo.
+      if (!(e.metaKey || e.ctrlKey) || (e.target as HTMLElement).closest('input, textarea, select')) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   const startProposal = (id: string) => {
     const a = byId.get(id)
     if (!a || presenter) return
@@ -95,7 +147,7 @@ export default function EffortValuePage() {
   const openReview = (p: Proposal) => setReviewing((r) => (r?.id === p.id ? null : { id: p.id, effort: p.effort, value: p.value }))
   const confirmReview = () => {
     if (!reviewing || !reviewed || reviewing.effort == null || reviewing.value == null) return
-    patch('abilities', reviewed.abilityId, { effort: reviewing.effort, value: reviewing.value })
+    rate([{ id: reviewed.abilityId, effort: reviewing.effort, value: reviewing.value }])
     remove('proposals', reviewed.id)
     setReviewing(null)
   }
@@ -244,7 +296,7 @@ export default function EffortValuePage() {
             )}
             <SortableContext items={live.items('abilities')} strategy={verticalListSortingStrategy}>
             {live.items('abilities').map((id) => byId.get(id)!).map((a) => (
-              <AbilityRow key={a.id} ability={a} presenter={presenter} hot={highlight === a.id || focusId === a.id} onHot={setHighlight} onPick={() => startProposal(a.id)}>
+              <AbilityRow key={a.id} ability={a} presenter={presenter} onRate={(r) => rate([{ id: a.id, effort: a.effort, value: a.value, ...r }])} hot={highlight === a.id || focusId === a.id} onHot={setHighlight} onPick={() => startProposal(a.id)}>
                 {!presenter && proposing?.abilityId === a.id && (
                   <div className="proposal-review mine">
                     {myPending(a.id) ? (
@@ -309,7 +361,8 @@ export default function EffortValuePage() {
           abilities={sorted}
           highlight={highlight ?? focusId}
           onHighlight={setHighlight}
-          onRate={presenter ? (ids, effort, value) => ids.forEach((id) => patch('abilities', id, { effort, value })) : undefined}
+          onRate={presenter ? (ids, effort, value) => rate(ids.map((id) => ({ id, effort, value }))) : undefined}
+          onUndo={presenter ? { undo, redo, canUndo: historySize.undo > 0, canRedo: historySize.redo > 0 } : undefined}
           proposal={chartProposal}
           onPropose={onPropose}
           onPick={presenter ? undefined : startProposal}
@@ -325,10 +378,12 @@ function AbilityRow({
   hot,
   onHot,
   onPick,
+  onRate,
   children,
 }: {
   ability: Ability
   presenter: boolean
+  onRate: (r: Partial<Pick<Ability, 'effort' | 'value'>>) => void
   hot: boolean
   onHot: (id: string | null) => void
   onPick: () => void
@@ -366,8 +421,8 @@ function AbilityRow({
               }}
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             />
-            <FibInput label="Effort" value={a.effort} onChange={(effort) => patch('abilities', a.id, { effort })} />
-            <FibInput label="Value" value={a.value} onChange={(value) => patch('abilities', a.id, { value })} />
+            <FibInput label="Effort" value={a.effort} onChange={(effort) => onRate({ effort })} />
+            <FibInput label="Value" value={a.value} onChange={(value) => onRate({ value })} />
             <span className={ratioClass(a)} title="Value ÷ effort">
               {ratio(a)}
             </span>

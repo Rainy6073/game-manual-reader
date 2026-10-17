@@ -15,6 +15,8 @@ interface Props {
   onPropose?: (effort: number, value: number) => void
   /** Called when someone clicks an ability's point or name. */
   onPick?: (id: string) => void
+  /** Undo / redo buttons for rating changes, shown with the zoom buttons. */
+  onUndo?: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean }
 }
 
 const PROPOSAL = '__proposal'
@@ -87,7 +89,7 @@ function textWidth(text: string, font: string) {
  * placed where it doesn't cover other names or markers (with a leader line when it
  * has to move away from its marker).
  */
-export default function ScatterChart({ abilities, highlight, onHighlight, onRate, proposal, onPropose, onPick }: Props) {
+export default function ScatterChart({ abilities, highlight, onHighlight, onRate, proposal, onPropose, onPick, onUndo }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 600, height: 400 })
   const presenter = useIsPresenter()
@@ -566,6 +568,17 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
         </svg>
 
         <div className="chart-zoom" onPointerDown={(e) => e.stopPropagation()}>
+          {onUndo && (
+            <>
+              <button type="button" className="icon" onClick={onUndo.undo} disabled={!onUndo.canUndo} aria-label="Undo" title="Undo rating change (⌘Z / Ctrl+Z)">
+                ↶
+              </button>
+              <button type="button" className="icon" onClick={onUndo.redo} disabled={!onUndo.canRedo} aria-label="Redo" title="Redo (⇧⌘Z / Ctrl+Y)">
+                ↷
+              </button>
+              <span className="chart-zoom-sep" />
+            </>
+          )}
           <button type="button" className="icon" onClick={() => zoomBy(1 / 1.5)} disabled={!zoomed} aria-label="Zoom out" title="Zoom out">
             −
           </button>
