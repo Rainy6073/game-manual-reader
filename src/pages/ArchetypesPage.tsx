@@ -1,6 +1,17 @@
-import { DndContext, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { useMemo } from 'react'
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  useDraggable,
+  useDroppable,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import { horizontalListSortingStrategy, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { useMemo, useState } from 'react'
 import { DropList, Sortable } from '../components/Sortable'
 import { useLiveSort } from '../liveSort'
 import { cardsFirst, useCardSensors } from '../reorder'
@@ -20,6 +31,17 @@ interface Board {
 // Drag ids: "pal:<ability id>" for the ability list (dropping copies it), "card:<item key>" for a card on an archetype.
 const PAL = 'pal:'
 const CARD = 'card:'
+/** Archetype columns themselves are dragged by "arch:<id>" to put them in order. */
+const ARCH = 'arch:'
+
+const rankOf = (a: Archetype) => a.order ?? a.createdAt
+
+// Columns only land on columns, and cards only on cards and columns' card lists.
+const collision: CollisionDetection = (args) => {
+  const movingColumn = String(args.active.id).startsWith(ARCH)
+  const droppableContainers = args.droppableContainers.filter((c) => String(c.id).startsWith(ARCH) === movingColumn)
+  return movingColumn ? closestCenter({ ...args, droppableContainers }) : cardsFirst({ ...args, droppableContainers })
+}
 
 export default function ArchetypesPage() {
   const presenter = useIsPresenter()
@@ -45,7 +67,7 @@ export default function ArchetypesPage() {
 
   const byId = useMemo(() => new Map(abilities.map((a) => [a.id, a])), [abilities])
   const sortedAbilities = useMemo(() => [...abilities].sort((a, b) => a.createdAt - b.createdAt), [abilities])
-  const columns = useMemo(() => [...board.archetypes].sort((a, b) => a.createdAt - b.createdAt), [board.archetypes])
+  const columns = useMemo(() => [...board.archetypes].sort((a, b) => rankOf(a) - rankOf(b)), [board.archetypes])
 
   const sensors = useCardSensors()
 
@@ -95,7 +117,50 @@ export default function ArchetypesPage() {
   })
 
   const addArchetype = () =>
-    board.save({ id: newId(), name: `Archetype ${board.archetypes.length + 1}`, items: [], createdAt: Date.now() })
+    board.save({
+      id: newId(),
+      name: `Archetype ${board.archetypes.length + 1}`,
+      items: [],
+      createdAt: Date.now(),
+      order: (columns.at(-1) ? rankOf(columns.at(-1)!) : 0) + 1000,
+    })
+
+  // Dragging an archetype by its grip moves the whole column; the others slide aside.
+  const [movingColumn, setMovingColumn] = useState<string | null>(null)
+  const moveColumn = (id: string, overId: string) => {
+    const from = columns.findIndex((a) => a.id === id)
+    const to = columns.findIndex((a) => a.id === overId)
+    if (from === -1 || to === -1 || from === to) return
+    const rest = columns.filter((a) => a.id !== id)
+    // Dropped on a column to its right: goes after it; to its left: before it.
+    const at = rest.findIndex((a) => a.id === overId) + (to > from ? 1 : 0)
+    const prev = rest[at - 1]
+    const next = rest[at]
+    const order = prev && next ? (rankOf(prev) + rankOf(next)) / 2 : prev ? rankOf(prev) + 1000 : next ? rankOf(next) - 1000 : 0
+    board.save({ ...columns[from], order })
+  }
+  const handlers = {
+    onDragStart: (e: DragStartEvent) => {
+      const id = String(e.active.id)
+      if (id.startsWith(ARCH)) setMovingColumn(id.slice(ARCH.length))
+      else live.handlers.onDragStart(e)
+    },
+    onDragOver: (e: DragOverEvent) => {
+      if (!String(e.active.id).startsWith(ARCH)) live.handlers.onDragOver(e)
+    },
+    onDragEnd: (e: DragEndEvent) => {
+      const id = String(e.active.id)
+      if (!id.startsWith(ARCH)) return live.handlers.onDragEnd(e)
+      setMovingColumn(null)
+      const over = e.over ? String(e.over.id) : null
+      if (over?.startsWith(ARCH)) moveColumn(id.slice(ARCH.length), over.slice(ARCH.length))
+    },
+    onDragCancel: () => {
+      setMovingColumn(null)
+      live.handlers.onDragCancel()
+    },
+  }
+  const movingArchetype = movingColumn ? columns.find((a) => a.id === movingColumn) : undefined
 
   // Replaces your board, so it asks for a second click when there is something on it.
   const copyMaster = () => {
@@ -143,13 +208,15 @@ export default function ArchetypesPage() {
         </div>
       </header>
 
-      <DndContext sensors={sensors} collisionDetection={cardsFirst} {...live.handlers}>
+      <DndContext sensors={sensors} collisionDetection={collision} {...handlers}>
         <div className="arch-body">
           {board.editable && <Palette abilities={sortedAbilities} editable />}
           <div className="columns">
-            {columns.map((a) => (
-              <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} cards={live.items(a.id)} />
-            ))}
+            <SortableContext items={columns.map((a) => ARCH + a.id)} strategy={horizontalListSortingStrategy}>
+              {columns.map((a) => (
+                <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} cards={live.items(a.id)} />
+              ))}
+            </SortableContext>
             {columns.length === 0 && (
               <div className="empty-board muted">
                 {board.editable ? 'Create an archetype to start combining abilities.' : 'No archetypes yet.'}
@@ -157,7 +224,18 @@ export default function ArchetypesPage() {
             )}
           </div>
         </div>
-        <DragOverlay dropAnimation={null}>{dragAbility && <CardFace ability={dragAbility} lifted />}</DragOverlay>
+        <DragOverlay dropAnimation={null}>
+          {dragAbility && <CardFace ability={dragAbility} lifted />}
+          {movingArchetype && (
+            <div className="column column-lifted">
+              <header className="column-head">
+                <span className="column-grip">⠿</span>
+                <h3>{movingArchetype.name}</h3>
+              </header>
+              <div className="column-totals muted small">{movingArchetype.items.length} abilities</div>
+            </div>
+          )}
+        </DragOverlay>
       </DndContext>
     </div>
   )
@@ -219,12 +297,31 @@ interface ColumnProps {
 }
 
 function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
+  const sort = useSortable({ id: ARCH + archetype.id, disabled: !board.editable })
   const items = archetype.items.filter((i) => byId.has(i.abilityId))
   const total = (k: 'effort' | 'value') => items.reduce((sum, i) => sum + (byId.get(i.abilityId)?.[k] ?? 0), 0)
 
   return (
+    <div
+      ref={sort.setNodeRef}
+      style={{ transform: CSS.Translate.toString(sort.transform), transition: sort.transition }}
+      className={`column-slot${sort.isDragging ? ' placeholder' : ''}`}
+    >
     <DropList group={archetype.id} enabled={board.editable} className="column">
       <header className="column-head">
+        {board.editable && (
+          <span
+            ref={sort.setActivatorNodeRef}
+            {...sort.listeners}
+            {...sort.attributes}
+            role={undefined}
+            className="column-grip"
+            title="Drag to move this archetype"
+            aria-label={`Move ${archetype.name}`}
+          >
+            ⠿
+          </span>
+        )}
         {board.editable ? (
           <input
             key={archetype.name}
@@ -285,6 +382,7 @@ function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
         </select>
       )}
     </DropList>
+    </div>
   )
 
   /** A card may be shown here while being dragged in from another archetype. */

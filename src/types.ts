@@ -62,6 +62,8 @@ export interface ArchetypeItem {
 export interface Archetype {
   id: string
   name: string
+  /** Position among the archetypes; unset keeps creation order. */
+  order?: number
   items: ArchetypeItem[]
   createdAt: number
 }

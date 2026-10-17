@@ -2962,3 +2962,40 @@ button.icon.armed {
 .chart.zoomed .plot-bg:active {
   cursor: grabbing;
 }
+
+/* Archetype columns can be dragged into order by the grip in their header. */
+.column-slot {
+  display: flex;
+  flex-shrink: 0;
+  max-height: 100%;
+  position: relative;
+  border-radius: 12px;
+}
+.column-slot.placeholder > * {
+  visibility: hidden;
+}
+.column-slot.placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  opacity: 0.6;
+}
+.column-grip {
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  padding: 2px 2px 0;
+  font-size: 1.05rem;
+}
+.column-grip:hover {
+  color: var(--accent);
+}
+.column-lifted {
+  box-shadow: 0 14px 40px rgb(60 0 0 / 0.22);
+  cursor: grabbing;
+  min-height: 120px;
+}
