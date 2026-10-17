@@ -1,17 +1,10 @@
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  TouchSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
+import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useMemo, useRef, useState } from 'react'
 import RefChip from '../components/RefChip'
-import { byRank, moveSubmission } from '../reorder'
+import { DropList, Sortable } from '../components/Sortable'
+import { useLiveSort } from '../liveSort'
+import { byRank, cardsFirst, placeSubmission, useCardSensors } from '../reorder'
 import SubmissionCard from '../components/SubmissionCard'
 import { clockTime, navigate } from '../nav'
 import { useIsPresenter, useSession } from '../session'
@@ -37,11 +30,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   const submissions = useCollection('submissions')
   const responses = useCollection('responses')
   const [filter, setFilter] = useState<Filter>('all')
-  const [dragging, setDragging] = useState<string | null>(null)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-  )
+  const sensors = useCardSensors()
 
   const prototypes = useMemo(
     () => submissions.filter((s) => s.prototype).sort(byRank),
@@ -54,31 +43,35 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
     return m
   }, [responses])
 
-  const open = openId ? submissions.find((s) => s.id === openId) : undefined
-  if (openId && open?.prototype) return <PrototypeDetail submission={open} />
-
   const shown = prototypes.filter((p) => filter === 'all' || isAssigned(p, name))
+  const byId = new Map(submissions.map((s) => [s.id, s]))
   const promote = (s: Submission, status: PrototypeStatus = 'todo') =>
     patch('submissions', s.id, { prototype: { assignees: [], status, createdAt: Date.now() } })
   const canMove = (s: Submission) => presenter || (!!s.prototype && isAssigned(s, name))
 
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDragging(null)
-    const target = over?.data.current as { status: PrototypeStatus; before?: string } | undefined
-    const s = submissions.find((x) => x.id === active.id)
-    if (!s || !target || target.before === s.id) return
-    const { status, before } = target
-    const prototype = s.prototype ? { ...s.prototype, status } : { assignees: [], status, createdAt: Date.now() }
-    // Dropped on a card: goes just before it. Dropped on a column: goes to its end.
-    const rest = prototypes.filter((p) => p.id !== s.id)
-    const last = rest.filter((p) => p.prototype!.status === status).at(-1)
-    const at = before ?? (last ? rest[rest.indexOf(last) + 1]?.id : rest.find((p) => p.prototype!.status === status)?.id)
-    moveSubmission(prototypes, s.id, at, { prototype })
-  }
-  const dragged = dragging ? submissions.find((x) => x.id === dragging) : undefined
+  // Cards slide between and within the status columns while dragged; questions from
+  // the inbox can be dragged into a column (but nothing goes back into the inbox).
+  const live = useLiveSort({
+    lists: {
+      ...(presenter ? { inbox: inbox.map((s) => s.id) } : {}),
+      ...Object.fromEntries(STATUS.map((st) => [st.id, shown.filter((p) => p.prototype!.status === st.id).map((p) => p.id)])),
+    },
+    canEnter: (_id, from, to) => to !== 'inbox' || from === 'inbox',
+    onMove: (id, to, before) => {
+      const s = byId.get(id)
+      if (!s || to === 'inbox') return
+      const status = to as PrototypeStatus
+      const prototype = s.prototype ? { ...s.prototype, status } : { assignees: [], status, createdAt: Date.now() }
+      placeSubmission(prototypes, id, shown.filter((p) => p.prototype!.status === status), before, { prototype })
+    },
+  })
+  const dragged = live.activeId ? byId.get(live.activeId) : undefined
+
+  const open = openId ? submissions.find((s) => s.id === openId) : undefined
+  if (openId && open?.prototype) return <PrototypeDetail submission={open} />
 
   return (
-    <DndContext sensors={sensors} onDragStart={(e) => setDragging(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+    <DndContext sensors={sensors} collisionDetection={cardsFirst} {...live.handlers}>
       <div className={`proto-page${presenter ? ' with-inbox' : ''}`}>
         {presenter && (
           <aside className="inbox">
@@ -89,8 +82,10 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
             <p className="muted small">Turn questions into prototype tasks (or drag them into a column), then assign people to them.</p>
             <div className="feed">
               {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
-              {inbox.map((s) => (
-                <Draggable key={s.id} id={s.id} enabled status={null}>
+              {/* The inbox keeps its own order: nothing shifts in it while dragging. */}
+              <SortableContext items={live.items('inbox')} strategy={() => null}>
+              {live.items('inbox').map((id) => byId.get(id)!).map((s) => (
+                <Sortable key={s.id} id={s.id} enabled whole className="drag-src">
                   <SubmissionCard
                     submission={s}
                     actions={
@@ -99,8 +94,9 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
                       </button>
                     }
                   />
-                </Draggable>
+                </Sortable>
               ))}
+              </SortableContext>
             </div>
           </aside>
         )}
@@ -137,22 +133,24 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
 
           <div className="proto-columns">
             {STATUS.map((st) => {
-              const items = shown.filter((p) => p.prototype!.status === st.id)
+              const items = live.items(st.id).map((id) => byId.get(id)!)
               return (
-                <StatusColumn key={st.id} status={st.id}>
+                <DropList key={st.id} group={st.id} enabled className={`column proto-column status-${st.id}`}>
                   <header className="column-head">
                     <h3>{st.label}</h3>
                     <span className="count-pill">{items.length}</span>
                   </header>
                   <div className="column-cards">
+                    <SortableContext items={live.items(st.id)} strategy={verticalListSortingStrategy}>
                     {items.map((p) => (
-                      <Draggable key={p.id} id={p.id} enabled={canMove(p)} status={st.id}>
-                        <ProtoCard p={p} updates={responseCount.get(p.id) ?? 0} />
-                      </Draggable>
+                      <Sortable key={p.id} id={p.id} enabled={canMove(p)} whole className={canMove(p) ? 'drag-src' : 'drag-src static'}>
+                        {p.prototype ? <ProtoCard p={p} updates={responseCount.get(p.id) ?? 0} /> : <SubmissionCard submission={p} />}
+                      </Sortable>
                     ))}
+                    </SortableContext>
                     {items.length === 0 && <p className="drop-hint muted small">{filter === 'mine' ? 'Nothing of yours here' : 'Drop cards here'}</p>}
                   </div>
-                </StatusColumn>
+                </DropList>
               )
             })}
           </div>
@@ -166,36 +164,6 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
         )}
       </DragOverlay>
     </DndContext>
-  )
-}
-
-function StatusColumn({ status, children }: { status: PrototypeStatus; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status, data: { status } })
-  return (
-    <section ref={setNodeRef} className={`column proto-column status-${status}${isOver ? ' over' : ''}`}>
-      {children}
-    </section>
-  )
-}
-
-/** A card that can be dragged; cards in a column are also drop targets, to insert before them. */
-function Draggable({ id, enabled, status, children }: { id: string; enabled: boolean; status: PrototypeStatus | null; children: React.ReactNode }) {
-  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id, disabled: !enabled })
-  const drop = useDroppable({ id: `before:${id}`, data: { status, before: id }, disabled: !status })
-  return (
-    <div
-      ref={(el) => {
-        setNodeRef(el)
-        drop.setNodeRef(el)
-      }}
-      {...listeners}
-      {...attributes}
-      role={undefined}
-      tabIndex={undefined}
-      className={`drag-src${isDragging ? ' ghost' : ''}${enabled ? '' : ' static'}${drop.isOver && !isDragging ? ' insert' : ''}`}
-    >
-      {children}
-    </div>
   )
 }
 

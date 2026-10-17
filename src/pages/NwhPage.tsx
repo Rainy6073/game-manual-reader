@@ -1,16 +1,9 @@
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  TouchSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core'
-import { useMemo, useState } from 'react'
+import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useMemo } from 'react'
+import { DropList, Sortable } from '../components/Sortable'
+import { useLiveSort } from '../liveSort'
+import { cardsFirst, useCardSensors } from '../reorder'
 import { useIsPresenter, useLocalState } from '../session'
 import { put, useCollection, useDoc } from '../sync/store'
 import type { Ability, Priorities, PriorityTier } from '../types'
@@ -49,11 +42,7 @@ export default function NwhPage() {
   const placed = new Set(TIERS.flatMap((t) => tierIds(t.id)))
   const unsorted = sorted.filter((a) => !placed.has(a.id))
 
-  const [dragging, setDragging] = useState<string | null>(null)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
-  )
+  const sensors = useCardSensors()
 
   const move = (abilityId: string, target: Target) => {
     const next: Priorities = { ...board, needs: [...board.needs], wants: [...board.wants], nice: [...board.nice] }
@@ -66,13 +55,12 @@ export default function NwhPage() {
     save(next)
   }
 
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDragging(null)
-    if (!over) return
-    const target = over.data.current as Target
-    if (target.before === active.id) return
-    move(String(active.id), target)
-  }
+  // Cards slide out of the way while dragging; the unsorted list keeps its own order.
+  const live = useLiveSort({
+    lists: { unsorted: unsorted.map((a) => a.id), ...Object.fromEntries(TIERS.map((t) => [t.id, tierIds(t.id)])) },
+    onMove: (id, to, before) => move(id, to === 'unsorted' ? { tier: 'unsorted' } : { tier: to as PriorityTier, before }),
+  })
+  const dragging = live.activeId
 
   const mineHasItems = mine.needs.length + mine.wants.length + mine.nice.length > 0
   const copyMaster = () => {
@@ -111,31 +99,27 @@ export default function NwhPage() {
         </div>
       </header>
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={(e: DragStartEvent) => setDragging(String(e.active.id))}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => setDragging(null)}
-      >
+      <DndContext sensors={sensors} collisionDetection={cardsFirst} {...live.handlers}>
         <div className="arch-body">
           {editable && (
-            <Zone target={{ tier: 'unsorted' }} className="palette">
+            <DropList group="unsorted" enabled as="aside" className="palette">
               <h3>
                 Unsorted <span className="count-pill">{unsorted.length}</span>
               </h3>
               {abilities.length === 0 && <p className="muted small">Add abilities on the Effort / Value page first.</p>}
               {abilities.length > 0 && unsorted.length === 0 && <p className="muted small">Everything is sorted.</p>}
-              {unsorted.map((a) => (
-                <Card key={a.id} ability={a} editable />
-              ))}
-            </Zone>
+              <SortableContext items={live.items('unsorted')} strategy={() => null}>
+                {live.items('unsorted').map((id) => (
+                  <Card key={id} ability={byId.get(id)!} editable />
+                ))}
+              </SortableContext>
+            </DropList>
           )}
           <div className="columns nwh-columns">
             {TIERS.map((t) => {
-              const ids = tierIds(t.id)
-              const items = ids.map((id) => byId.get(id)!)
+              const items = live.items(t.id).map((id) => byId.get(id)!)
               return (
-                <Zone key={t.id} target={{ tier: t.id }} className={`column nwh-column tier-${t.id}`}>
+                <DropList key={t.id} group={t.id} enabled={editable} className={`column nwh-column tier-${t.id}`}>
                   <header className="column-head">
                     <h3>{t.label}</h3>
                     <span className="count-pill">{items.length}</span>
@@ -152,9 +136,11 @@ export default function NwhPage() {
                     </span>
                   </div>
                   <div className="column-cards">
-                    {items.map((a) => (
-                      <Card key={a.id} ability={a} editable={editable} tier={t.id} onRemove={editable ? () => move(a.id, { tier: 'unsorted' }) : undefined} />
-                    ))}
+                    <SortableContext items={live.items(t.id)} strategy={verticalListSortingStrategy}>
+                      {items.map((a) => (
+                        <Card key={a.id} ability={a} editable={editable} onRemove={editable ? () => move(a.id, { tier: 'unsorted' }) : undefined} />
+                      ))}
+                    </SortableContext>
                     {items.length === 0 && <p className="drop-hint muted small">{editable ? 'Drop abilities here' : 'Empty'}</p>}
                   </div>
                   {editable && unsorted.length > 0 && (
@@ -172,7 +158,7 @@ export default function NwhPage() {
                       ))}
                     </select>
                   )}
-                </Zone>
+                </DropList>
               )
             })}
           </div>
@@ -183,31 +169,11 @@ export default function NwhPage() {
   )
 }
 
-function Zone({ target, className, children }: { target: Target; className: string; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `zone:${target.tier}`, data: target })
+function Card({ ability, editable, onRemove }: { ability: Ability; editable: boolean; onRemove?: () => void }) {
   return (
-    <section ref={setNodeRef} className={`${className}${isOver ? ' over' : ''}`}>
-      {children}
-    </section>
-  )
-}
-
-function Card({ ability, editable, tier, onRemove }: { ability: Ability; editable: boolean; tier?: PriorityTier; onRemove?: () => void }) {
-  const drag = useDraggable({ id: ability.id, disabled: !editable })
-  // Cards in a column are also drop targets, so dropping on one inserts before it.
-  const drop = useDroppable({ id: `before:${ability.id}`, data: { tier: tier ?? 'unsorted', before: tier ? ability.id : undefined }, disabled: !editable || !tier })
-  return (
-    <div
-      ref={(el) => {
-        drag.setNodeRef(el)
-        drop.setNodeRef(el)
-      }}
-      {...drag.listeners}
-      {...drag.attributes}
-      className={`drag-src${drag.isDragging ? ' ghost' : ''}${drop.isOver && !drag.isDragging ? ' insert' : ''}${editable ? '' : ' static'}`}
-    >
+    <Sortable id={ability.id} enabled={editable} whole className={`drag-src${editable ? '' : ' static'}`}>
       <CardFace ability={ability} onRemove={onRemove} />
-    </div>
+    </Sortable>
   )
 }
 
@@ -220,7 +186,7 @@ function CardFace({ ability, lifted, onRemove }: { ability: Ability; lifted?: bo
         <span title="Value">V {ability.value ?? '–'}</span>
       </span>
       {onRemove && (
-        <button className="card-remove" onPointerDown={(e) => e.stopPropagation()} onClick={onRemove} aria-label={`Move ${ability.name} back to unsorted`}>
+        <button className="card-remove" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} onClick={onRemove} aria-label={`Move ${ability.name} back to unsorted`}>
           ✕
         </button>
       )}

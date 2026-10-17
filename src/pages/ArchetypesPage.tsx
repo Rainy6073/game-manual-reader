@@ -1,16 +1,9 @@
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  TouchSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from '@dnd-kit/core'
-import { useMemo, useState } from 'react'
+import { DndContext, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useMemo } from 'react'
+import { DropList, Sortable } from '../components/Sortable'
+import { useLiveSort } from '../liveSort'
+import { cardsFirst, useCardSensors } from '../reorder'
 import { useIsPresenter, useLocalState } from '../session'
 import { put, remove, useCollection } from '../sync/store'
 import { newId, type Ability, type Archetype } from '../types'
@@ -24,7 +17,9 @@ interface Board {
   remove: (id: string) => void
 }
 
-type DragData = { type: 'palette'; abilityId: string } | { type: 'card'; archetypeId: string; key: string; abilityId: string }
+// Drag ids: "pal:<ability id>" for the ability list (dropping copies it), "card:<item key>" for a card on an archetype.
+const PAL = 'pal:'
+const CARD = 'card:'
 
 export default function ArchetypesPage() {
   const presenter = useIsPresenter()
@@ -52,43 +47,52 @@ export default function ArchetypesPage() {
   const sortedAbilities = useMemo(() => [...abilities].sort((a, b) => a.createdAt - b.createdAt), [abilities])
   const columns = useMemo(() => [...board.archetypes].sort((a, b) => a.createdAt - b.createdAt), [board.archetypes])
 
-  const [dragging, setDragging] = useState<DragData | null>(null)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
-  )
+  const sensors = useCardSensors()
 
-  const findArch = (id: string) => board.archetypes.find((a) => a.id === id)
-
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDragging(null)
-    const data = active.data.current as DragData | undefined
-    if (!data || !over) return
-    const target = over.data.current as { type: 'column'; archetypeId: string } | { type: 'slot'; archetypeId: string; key: string } | { type: 'palette' }
-
-    // Dropping a card back on the list removes it from its archetype.
-    if (target.type === 'palette') {
-      if (data.type === 'card') {
-        const from = findArch(data.archetypeId)
-        if (from) board.save({ ...from, items: from.items.filter((i) => i.key !== data.key) })
-      }
-      return
+  /** The archetype a card is on, and the card. */
+  const findCard = (key: string) => {
+    for (const a of board.archetypes) {
+      const item = a.items.find((i) => i.key === key)
+      if (item) return { archetype: a, item }
     }
-
-    const card = data.type === 'card' ? { key: data.key, abilityId: data.abilityId } : { key: newId(), abilityId: data.abilityId }
-    const updates = new Map<string, Archetype>()
-    if (data.type === 'card') {
-      const from = findArch(data.archetypeId)
-      if (from) updates.set(from.id, { ...from, items: from.items.filter((i) => i.key !== data.key) })
-    }
-    const to = updates.get(target.archetypeId) ?? findArch(target.archetypeId)
-    if (!to) return
-    const items = [...to.items]
-    const at = target.type === 'slot' ? items.findIndex((i) => i.key === target.key) : -1
-    items.splice(at === -1 ? items.length : at, 0, card)
-    updates.set(to.id, { ...to, items })
-    for (const a of updates.values()) board.save(a)
+    return null
   }
+
+  // Cards slide between and within archetypes while dragged. Abilities from the
+  // list are copies: they drop in where they are let go.
+  const live = useLiveSort({
+    lists: Object.fromEntries(columns.map((a) => [a.id, a.items.filter((i) => byId.has(i.abilityId)).map((i) => CARD + i.key)])),
+    canEnter: () => board.editable,
+    onMove: (id, to, before) => {
+      const target = board.archetypes.find((a) => a.id === to)
+      if (!target) return
+      const beforeKey = before?.slice(CARD.length)
+      const insert = (items: Archetype['items'], item: Archetype['items'][number]) => {
+        const at = beforeKey ? items.findIndex((i) => i.key === beforeKey) : -1
+        const next = [...items]
+        next.splice(at === -1 ? next.length : at, 0, item)
+        return next
+      }
+      if (id.startsWith(PAL)) {
+        board.save({ ...target, items: insert(target.items, { key: newId(), abilityId: id.slice(PAL.length) }) })
+        return
+      }
+      const found = findCard(id.slice(CARD.length))
+      if (!found) return
+      if (found.archetype.id === target.id) {
+        board.save({ ...target, items: insert(target.items.filter((i) => i.key !== found.item.key), found.item) })
+      } else {
+        board.save({ ...found.archetype, items: found.archetype.items.filter((i) => i.key !== found.item.key) })
+        board.save({ ...target, items: insert(target.items, found.item) })
+      }
+    },
+    // Dropping a card back on the ability list removes it from its archetype.
+    onDropElsewhere: (id, overId) => {
+      if (overId !== 'palette' || !id.startsWith(CARD)) return
+      const found = findCard(id.slice(CARD.length))
+      if (found) board.save({ ...found.archetype, items: found.archetype.items.filter((i) => i.key !== found.item.key) })
+    },
+  })
 
   const addArchetype = () =>
     board.save({ id: newId(), name: `Archetype ${board.archetypes.length + 1}`, items: [], createdAt: Date.now() })
@@ -98,7 +102,11 @@ export default function ArchetypesPage() {
     setMine(master.map((a) => ({ ...a, id: newId(), items: a.items.map((i) => ({ ...i, key: newId() })) })))
   }
 
-  const dragAbility = dragging ? byId.get(dragging.abilityId) : undefined
+  const dragAbility = !live.activeId
+    ? undefined
+    : live.activeId.startsWith(PAL)
+      ? byId.get(live.activeId.slice(PAL.length))
+      : byId.get(findCard(live.activeId.slice(CARD.length))?.item.abilityId ?? '')
 
   return (
     <div className="arch-page">
@@ -135,17 +143,12 @@ export default function ArchetypesPage() {
         </div>
       </header>
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={(e: DragStartEvent) => setDragging(e.active.data.current as DragData)}
-        onDragEnd={onDragEnd}
-        onDragCancel={() => setDragging(null)}
-      >
+      <DndContext sensors={sensors} collisionDetection={cardsFirst} {...live.handlers}>
         <div className="arch-body">
           {board.editable && <Palette abilities={sortedAbilities} editable />}
           <div className="columns">
             {columns.map((a) => (
-              <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} />
+              <Column key={a.id} archetype={a} byId={byId} abilities={sortedAbilities} board={board} cards={live.items(a.id)} />
             ))}
             {columns.length === 0 && (
               <div className="empty-board muted">
@@ -161,7 +164,7 @@ export default function ArchetypesPage() {
 }
 
 function Palette({ abilities, editable }: { abilities: Ability[]; editable: boolean }) {
-  const { setNodeRef, isOver } = useDroppable({ id: 'palette', data: { type: 'palette' }, disabled: !editable })
+  const { setNodeRef, isOver } = useDroppable({ id: 'palette', disabled: !editable })
   return (
     <aside ref={setNodeRef} className={`palette${isOver ? ' over' : ''}`}>
       <h3>Abilities</h3>
@@ -174,11 +177,7 @@ function Palette({ abilities, editable }: { abilities: Ability[]; editable: bool
 }
 
 function PaletteItem({ ability, editable }: { ability: Ability; editable: boolean }) {
-  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
-    id: `pal:${ability.id}`,
-    data: { type: 'palette', abilityId: ability.id },
-    disabled: !editable,
-  })
+  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id: PAL + ability.id, disabled: !editable })
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} className={`drag-src${isDragging ? ' ghost' : ''}${editable ? '' : ' static'}`}>
       <CardFace ability={ability} />
@@ -198,6 +197,8 @@ function CardFace({ ability, lifted, onRemove }: { ability: Ability; lifted?: bo
         <button
           className="card-remove"
           onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
           onClick={onRemove}
           aria-label={`Remove ${ability.name}`}
         >
@@ -213,19 +214,16 @@ interface ColumnProps {
   byId: Map<string, Ability>
   abilities: Ability[]
   board: Board
+  /** Its cards' drag ids, in the order shown (rearranged while dragging). */
+  cards: string[]
 }
 
-function Column({ archetype, byId, abilities, board }: ColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `col:${archetype.id}`,
-    data: { type: 'column', archetypeId: archetype.id },
-    disabled: !board.editable,
-  })
+function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
   const items = archetype.items.filter((i) => byId.has(i.abilityId))
   const total = (k: 'effort' | 'value') => items.reduce((sum, i) => sum + (byId.get(i.abilityId)?.[k] ?? 0), 0)
 
   return (
-    <section ref={setNodeRef} className={`column${isOver ? ' over' : ''}`}>
+    <DropList group={archetype.id} enabled={board.editable} className="column">
       <header className="column-head">
         {board.editable ? (
           <input
@@ -258,10 +256,15 @@ function Column({ archetype, byId, abilities, board }: ColumnProps) {
         </span>
       </div>
       <div className="column-cards">
-        {items.map((item) => (
-          <ColumnCard key={item.key} archetype={archetype} itemKey={item.key} ability={byId.get(item.abilityId)!} board={board} />
-        ))}
-        {items.length === 0 && <p className="drop-hint muted small">{board.editable ? 'Drop abilities here' : 'Empty'}</p>}
+        <SortableContext items={cards} strategy={verticalListSortingStrategy}>
+          {cards.map((id) => {
+            const found = findItem(id.slice(CARD.length))
+            return found && byId.has(found.item.abilityId) ? (
+              <ColumnCard key={id} archetype={found.archetype} itemKey={found.item.key} ability={byId.get(found.item.abilityId)!} board={board} />
+            ) : null
+          })}
+        </SortableContext>
+        {cards.length === 0 && <p className="drop-hint muted small">{board.editable ? 'Drop abilities here' : 'Empty'}</p>}
       </div>
       {board.editable && abilities.length > 0 && (
         <select
@@ -281,36 +284,26 @@ function Column({ archetype, byId, abilities, board }: ColumnProps) {
           ))}
         </select>
       )}
-    </section>
+    </DropList>
   )
+
+  /** A card may be shown here while being dragged in from another archetype. */
+  function findItem(key: string) {
+    for (const a of board.archetypes) {
+      const item = a.items.find((i) => i.key === key)
+      if (item) return { archetype: a, item }
+    }
+    return null
+  }
 }
 
 function ColumnCard({ archetype, itemKey, ability, board }: { archetype: Archetype; itemKey: string; ability: Ability; board: Board }) {
-  const drag = useDraggable({
-    id: `card:${itemKey}`,
-    data: { type: 'card', archetypeId: archetype.id, key: itemKey, abilityId: ability.id },
-    disabled: !board.editable,
-  })
-  // Each card is also a drop target, so dropping on it inserts before it.
-  const drop = useDroppable({
-    id: `slot:${itemKey}`,
-    data: { type: 'slot', archetypeId: archetype.id, key: itemKey },
-    disabled: !board.editable,
-  })
   return (
-    <div
-      ref={(el) => {
-        drag.setNodeRef(el)
-        drop.setNodeRef(el)
-      }}
-      {...drag.listeners}
-      {...drag.attributes}
-      className={`drag-src${drag.isDragging ? ' ghost' : ''}${drop.isOver && !drag.isDragging ? ' insert' : ''}${board.editable ? '' : ' static'}`}
-    >
+    <Sortable id={CARD + itemKey} enabled={board.editable} whole className={`drag-src${board.editable ? '' : ' static'}`} insertFor={(id) => id.startsWith(PAL)}>
       <CardFace
         ability={ability}
         onRemove={board.editable ? () => board.save({ ...archetype, items: archetype.items.filter((i) => i.key !== itemKey) }) : undefined}
       />
-    </div>
+    </Sortable>
   )
 }

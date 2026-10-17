@@ -1,9 +1,12 @@
-import { DndContext, DragOverlay, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core'
+import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useMemo, useState } from 'react'
 import ConfirmButton from '../components/ConfirmButton'
 import FibInput from '../components/FibInput'
 import ScatterChart from '../components/ScatterChart'
 import { FIB } from '../fib'
+import { useLiveSort } from '../liveSort'
 import { cardsFirst, useCardSensors } from '../reorder'
 import { useIsPresenter, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
@@ -78,18 +81,18 @@ export default function EffortValuePage() {
 
   // Presenter: drag rows to rearrange the list, or sort it once by a rule.
   const sensors = useCardSensors()
-  const [dragging, setDragging] = useState<string | null>(null)
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    setDragging(null)
-    const before = (over?.data.current as { before?: string } | undefined)?.before
-    if (!over || before === active.id) return
-    const rest = sorted.filter((a) => a.id !== active.id)
-    const at = before ? rest.findIndex((a) => a.id === before) : rest.length
-    const prev = rest[at - 1]
-    const next = rest[at]
-    const order = prev && next ? (rankOf(prev) + rankOf(next)) / 2 : prev ? rankOf(prev) + 1000 : next ? rankOf(next) - 1000 : 0
-    patch('abilities', String(active.id), { order })
-  }
+  const live = useLiveSort({
+    lists: { abilities: sorted.map((a) => a.id) },
+    onMove: (id, _to, before) => {
+      const rest = sorted.filter((a) => a.id !== id)
+      const at = before ? rest.findIndex((a) => a.id === before) : rest.length
+      const prev = rest[at - 1]
+      const next = rest[at]
+      const order = prev && next ? (rankOf(prev) + rankOf(next)) / 2 : prev ? rankOf(prev) + 1000 : next ? rankOf(next) - 1000 : 0
+      patch('abilities', id, { order })
+    },
+  })
+  const dragging = live.activeId
   const sortBy = (key: SortKey) => {
     const rule = SORTS.find((s) => s.id === key)!
     ;[...sorted].sort(rule.compare).forEach((a, i) => a.order !== (i + 1) * 1000 && patch('abilities', a.id, { order: (i + 1) * 1000 }))
@@ -194,9 +197,7 @@ export default function EffortValuePage() {
         <DndContext
           sensors={sensors}
           collisionDetection={cardsFirst}
-          onDragStart={(e) => setDragging(String(e.active.id))}
-          onDragCancel={() => setDragging(null)}
-          onDragEnd={onDragEnd}
+          {...live.handlers}
         >
           <div className="ability-table" role="table">
             <div className="ability-row head" role="row">
@@ -209,7 +210,8 @@ export default function EffortValuePage() {
             {sorted.length === 0 && (
               <p className="empty muted">{presenter ? 'Add everything a robot could do this season.' : 'No abilities yet.'}</p>
             )}
-            {sorted.map((a) => (
+            <SortableContext items={live.items('abilities')} strategy={verticalListSortingStrategy}>
+            {live.items('abilities').map((id) => byId.get(id)!).map((a) => (
               <AbilityRow key={a.id} ability={a} presenter={presenter} hot={highlight === a.id || focusId === a.id} onHot={setHighlight} onPick={() => startProposal(a.id)}>
                 {!presenter && proposing?.abilityId === a.id && (
                   <div className="proposal-review mine">
@@ -246,7 +248,7 @@ export default function EffortValuePage() {
                 )}
               </AbilityRow>
             ))}
-            {presenter && <ListEnd />}
+            </SortableContext>
           </div>
           <DragOverlay dropAnimation={null}>
             {dragging && byId.get(dragging) && <div className="ability-row lifted">{byId.get(dragging)!.name}</div>}
@@ -284,15 +286,12 @@ function AbilityRow({
   onPick: () => void
   children?: React.ReactNode
 }) {
-  const drag = useDraggable({ id: a.id, disabled: !presenter })
-  const drop = useDroppable({ id: `before:${a.id}`, data: { before: a.id }, disabled: !presenter })
+  const drag = useSortable({ id: a.id, disabled: !presenter })
   return (
     <div
-      ref={(el) => {
-        drag.setNodeRef(el)
-        drop.setNodeRef(el)
-      }}
-      className={`ability-item${drag.isDragging ? ' ghost' : ''}${drop.isOver && !drag.isDragging ? ' insert' : ''}`}
+      ref={drag.setNodeRef}
+      style={{ transform: CSS.Translate.toString(drag.transform), transition: drag.transition }}
+      className={`ability-item${drag.isDragging ? ' placeholder' : ''}`}
     >
       <div
         role="row"
@@ -348,10 +347,4 @@ function AbilityRow({
       {children}
     </div>
   )
-}
-
-/** The space after the last row, for dragging a row to the end. */
-function ListEnd() {
-  const { setNodeRef, isOver } = useDroppable({ id: 'end', data: {} })
-  return <div ref={setNodeRef} className={`ability-end${isOver ? ' insert' : ''}`} />
 }

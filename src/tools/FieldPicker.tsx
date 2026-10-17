@@ -214,6 +214,16 @@ function CropEditor({ doc, page, box, onBox, onPage }: CropProps) {
     }
   }, [doc, page])
 
+  // iOS can ignore touch-action inside scrolling boxes; stop the page from moving
+  // under a finger that is selecting.
+  useEffect(() => {
+    const area = areaRef.current
+    if (!area) return
+    const stop = (e: TouchEvent) => startRef.current && e.preventDefault()
+    area.addEventListener('touchmove', stop, { passive: false })
+    return () => area.removeEventListener('touchmove', stop)
+  }, [img])
+
   const point = (e: React.PointerEvent) => {
     const r = areaRef.current!.getBoundingClientRect()
     // The preview may be shown smaller than it was rendered.
@@ -247,7 +257,12 @@ function CropEditor({ doc, page, box, onBox, onPage }: CropProps) {
             ref={areaRef}
             className="crop-area"
             onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId)
+              e.preventDefault()
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId)
+              } catch {
+                // Capture is best-effort.
+              }
               startRef.current = point(e)
               setDrag({ ...startRef.current, w: 0, h: 0 })
             }}
@@ -261,6 +276,10 @@ function CropEditor({ doc, page, box, onBox, onPage }: CropProps) {
               if (drag && drag.w > 12 && drag.h > 12) {
                 onBox({ x: drag.x / img.scale, y: drag.y / img.scale, w: drag.w / img.scale, h: drag.h / img.scale })
               }
+              startRef.current = null
+              setDrag(null)
+            }}
+            onPointerCancel={() => {
               startRef.current = null
               setDrag(null)
             }}

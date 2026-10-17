@@ -428,45 +428,48 @@ button.ghost:hover:not(:disabled) {
 .field small {
   font-weight: 400;
 }
-.view-pick {
-  border: none;
-  padding: 0;
+.view-blurb {
   margin: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  font-size: 1.05rem;
+  line-height: 1.45;
 }
-.view-pick legend {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.view-option {
+.view-blurb.presenter {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 14px;
-  border: 2px solid var(--border);
+  border: 2px solid var(--text);
   border-radius: 12px;
-  cursor: pointer;
+  background: var(--surface);
 }
-.view-option input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-.view-option strong {
+.view-blurb.presenter strong {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 1.6rem;
   line-height: 1;
 }
-.view-option.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+.welcome-card.presenting {
+  border-top-color: var(--text);
 }
-.view-option:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* The presenter view is a small switch in the corner, out of the way. */
+.presenter-switch {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: rgb(255 255 255 / 0.7);
+  border-color: var(--border);
+  border-radius: 999px;
+}
+.presenter-switch:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text);
+}
+.presenter-switch.on {
+  color: var(--text);
+  background: var(--bg);
 }
 
 /* ---------- Page 1: Game manual ---------- */
@@ -1403,11 +1406,35 @@ span.ability-name {
   fill: var(--accent);
   stroke: #fff;
   stroke-width: 2;
+  /* Grow from the dot's own center, smoothly, when highlighted. */
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.3),
+    fill 0.2s,
+    stroke 0.2s,
+    stroke-width 0.2s;
 }
-.chart .marker.hot circle {
+.chart .marker.hot circle:not(.grab) {
   fill: var(--accent-strong);
   stroke: var(--accent-soft);
   stroke-width: 4;
+  transform: scale(1.35);
+}
+.chart .marker-count {
+  transition: font-size 0.2s;
+}
+.chart .label {
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart .marker circle,
+  .chart .label {
+    transition: none;
+  }
 }
 .chart .marker-count {
   fill: #fff;
@@ -2247,6 +2274,16 @@ span.ability-name {
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
 }
+/* Keep "Use this field" in reach on small screens. */
+.field-picker > footer {
+  position: sticky;
+  bottom: -22px;
+  margin: 0 -22px -22px;
+  padding: 10px 22px;
+  border-radius: 0 0 14px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
 .candidates {
   display: flex;
   gap: 10px;
@@ -2296,25 +2333,34 @@ span.ability-name {
   gap: 8px;
 }
 .crop-scroll {
-  max-height: 60vh;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--viewer-bg);
   padding: 8px;
 }
+/* The whole page is shown at once (no scrolling inside it), so a finger can drag a
+   box anywhere on it and still scroll the dialog from the space around it. */
 .crop-area {
   position: relative;
-  max-width: 760px;
+  width: fit-content;
+  max-width: min(760px, 100%);
   margin: 0 auto;
   cursor: crosshair;
   touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .crop-area img {
   display: block;
-  width: 100%;
+  width: auto;
+  /* Fits the dialog on narrow phones too (the dialog's padding takes ~96px). */
+  max-width: min(100%, calc(100vw - 96px));
+  max-height: 58vh;
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.15);
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 .crop-box {
   position: absolute;
@@ -2768,14 +2814,23 @@ button.danger-fill {
     height: 40px;
     margin-top: 6px;
     justify-content: space-between;
+    gap: 0;
+    /* Six tabs on a narrow phone: scroll sideways rather than widen the page. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
   }
   .tab-num,
   .sync-label {
     display: none;
   }
   .tab {
-    padding: 3px 8px 0;
-    font-size: 1.3rem;
+    flex-shrink: 0;
+    padding: 3px 6px 0;
+    font-size: 1.15rem;
   }
   .who-name {
     max-width: 8ch;
@@ -2802,9 +2857,6 @@ button.danger-fill {
   }
   .bar-hide {
     padding: 2px 6px;
-  }
-  .view-pick {
-    grid-template-columns: 1fr;
   }
   .column {
     width: 82vw;
@@ -2833,5 +2885,36 @@ button.icon.armed {
 @keyframes armed-pulse {
   to {
     box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+/* While dragging, the card's spot in the list is an empty slot that moves as the
+   other cards slide out of the way. */
+.sortable.placeholder,
+.ability-item.placeholder {
+  position: relative;
+  border-radius: var(--radius);
+}
+.sortable.placeholder > *,
+.ability-item.placeholder > * {
+  visibility: hidden;
+}
+.sortable.placeholder::after,
+.ability-item.placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  opacity: 0.6;
+}
+.column.drop-over {
+  background: var(--accent-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sortable,
+  .ability-item {
+    transition: none !important;
   }
 }

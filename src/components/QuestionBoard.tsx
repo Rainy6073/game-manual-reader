@@ -1,11 +1,13 @@
 import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { rectSortingStrategy, SortableContext } from '@dnd-kit/sortable'
 import { useMemo, useState } from 'react'
 import type { ManualRef } from '../reader/ManualReader'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
 import { newId, type BoardGroup, type Submission } from '../types'
 import Composer from './Composer'
-import { byRank, cardsFirst, reorderOnDrop, useCardSensors } from '../reorder'
+import { useLiveSort } from '../liveSort'
+import { byRank, cardsFirst, placeSubmission, useCardSensors } from '../reorder'
 import { DropList, Sortable } from './Sortable'
 import SubmissionCard from './SubmissionCard'
 import ConfirmButton from './ConfirmButton'
@@ -109,13 +111,18 @@ export default function QuestionBoard({ submissions, reference, onClearReference
   // groups (with "Our groups").
   const canReorder = sort === 'custom'
   const ranked = useMemo(() => [...submissions].sort(byRank), [submissions])
-  const [dragging, setDragging] = useState<string | null>(null)
   const sensors = useCardSensors()
-  const regroup = (_: Submission, key: string): Partial<Submission> | null => {
-    if (groupBy === 'custom') return { groupId: key === UNGROUPED ? undefined : key }
-    return null
-  }
-  const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
+  const byId = useMemo(() => new Map(submissions.map((s) => [s.id, s])), [submissions])
+  // Cards can only move into another column when that changes something: a group.
+  const live = useLiveSort({
+    lists: Object.fromEntries(groups.map((g) => [g.key, g.items.map((s) => s.id)])),
+    canEnter: (_id, from, to) => from === to || groupBy === 'custom',
+    onMove: (id, to, before, from) => {
+      const extra = from !== to ? { groupId: to === UNGROUPED ? undefined : to } : undefined
+      placeSubmission(ranked, id, groups.find((g) => g.key === to)?.items ?? [], before, extra)
+    },
+  })
+  const dragged = live.activeId ? byId.get(live.activeId) : undefined
 
   const total = groups.reduce((n, g) => n + g.items.length, 0)
 
@@ -178,12 +185,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
       <DndContext
         sensors={sensors}
         collisionDetection={cardsFirst}
-        onDragStart={(e) => setDragging(String(e.active.id))}
-        onDragCancel={() => setDragging(null)}
-        onDragEnd={(e) => {
-          setDragging(null)
-          reorderOnDrop(ranked, e, (s) => groupOf(s, groupBy, custom)[0], regroup)
-        }}
+        {...live.handlers}
       >
       <div className={`board-columns${groups.length <= 3 ? ' wide' : ''}`}>
         {groups.length === 0 && <p className="empty muted">{query ? 'Nothing matches your search.' : 'No questions yet.'}</p>}
@@ -206,7 +208,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
               ) : (
                 <h3>{g.title}</h3>
               )}
-              <span className="count-pill">{g.items.length}</span>
+              <span className="count-pill">{live.items(g.key).length}</span>
               {groupBy === 'custom' && g.key !== UNGROUPED && (
                 <ConfirmButton
                   className="icon ghost"
@@ -220,9 +222,10 @@ export default function QuestionBoard({ submissions, reference, onClearReference
               )}
             </header>
             <div className="board-cards">
-              {g.items.length === 0 && <p className="muted small empty">{canReorder ? 'Drag cards here.' : 'Nothing here yet.'}</p>}
-              {g.items.map((s) => (
-                <Sortable key={s.id} id={s.id} group={g.key} enabled={canReorder}>
+              <SortableContext items={live.items(g.key)} strategy={rectSortingStrategy}>
+              {live.items(g.key).length === 0 && <p className="muted small empty">{canReorder ? 'Drag cards here.' : 'Nothing here yet.'}</p>}
+              {live.items(g.key).map((id) => byId.get(id)!).map((s) => (
+                <Sortable key={s.id} id={s.id} enabled={canReorder}>
                   {(grip) => (
                 <SubmissionCard
                   submission={s}
@@ -242,6 +245,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                   )}
                 </Sortable>
               ))}
+              </SortableContext>
             </div>
           </DropList>
         ))}

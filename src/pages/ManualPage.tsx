@@ -1,10 +1,12 @@
 import { DndContext, DragOverlay } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Composer from '../components/Composer'
 import { AttachPicker, NoteEditor, NotesList, type NoteDraft } from '../components/ManualNotes'
 import QuestionBoard from '../components/QuestionBoard'
 import { DropList, Sortable } from '../components/Sortable'
-import { byRank, cardsFirst, reorderOnDrop, useCardSensors } from '../reorder'
+import { useLiveSort } from '../liveSort'
+import { byRank, cardsFirst, placeSubmission, useCardSensors } from '../reorder'
 import SubmissionCard from '../components/SubmissionCard'
 import ManualReader, { type ManualRef, type ManualSource } from '../reader/ManualReader'
 import { isPasswordError, loadPdf } from '../reader/pdf'
@@ -172,10 +174,14 @@ export default function ManualPage() {
 
   // Newest first, unless someone has dragged things into another order (shared by everyone).
   const sorted = useMemo(() => [...submissions].sort(byRank), [submissions])
-  const [dragging, setDragging] = useState<string | null>(null)
   const sensors = useCardSensors()
-  const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
   const shown = filter === 'notes' ? [] : sorted.filter((s) => filter === 'all' || s.author === name)
+  const byId = useMemo(() => new Map(submissions.map((s) => [s.id, s])), [submissions])
+  const live = useLiveSort({
+    lists: { feed: shown.map((s) => s.id) },
+    onMove: (id, _to, before) => placeSubmission(sorted, id, shown, before),
+  })
+  const dragged = live.activeId ? byId.get(live.activeId) : undefined
   const counts = {
     all: sorted.length,
     mine: sorted.filter((s) => s.author === name).length,
@@ -285,12 +291,7 @@ export default function ManualPage() {
             <DndContext
               sensors={sensors}
               collisionDetection={cardsFirst}
-              onDragStart={(e) => setDragging(String(e.active.id))}
-              onDragCancel={() => setDragging(null)}
-              onDragEnd={(e) => {
-                setDragging(null)
-                reorderOnDrop(sorted, e, () => 'feed')
-              }}
+              {...live.handlers}
             >
             <DropList group="feed" enabled={filter !== 'notes'} className="feed">
               {filter === 'notes' && <NotesList notes={myNotes} onJump={jumpTo} onEdit={(note, at) => setNoteDraft({ note, at })} />}
@@ -299,8 +300,9 @@ export default function ManualPage() {
                   {filter === 'mine' ? 'Nothing sent yet. Your questions will show up here.' : 'No submissions yet.'}
                 </p>
               )}
-              {shown.map((s) => (
-                <Sortable key={s.id} id={s.id} group="feed" enabled>
+              <SortableContext items={live.items('feed')} strategy={verticalListSortingStrategy}>
+              {live.items('feed').map((id) => byId.get(id)!).map((s) => (
+                <Sortable key={s.id} id={s.id} enabled>
                   {(grip) => (
                 <SubmissionCard
                   submission={s}
@@ -318,6 +320,7 @@ export default function ManualPage() {
                   )}
                 </Sortable>
               ))}
+              </SortableContext>
             </DropList>
               <DragOverlay dropAnimation={null}>{dragged && <div className="sortable-lifted"><SubmissionCard submission={dragged} /></div>}</DragOverlay>
             </DndContext>
