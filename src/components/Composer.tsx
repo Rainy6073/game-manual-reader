@@ -6,13 +6,25 @@ import { newId } from '../types'
 import RefChip from './RefChip'
 
 interface Props {
-  reference: ManualRef | null
-  onClearReference: () => void
-  onJump: (ref: ManualRef) => void
+  reference?: ManualRef | null
+  onClearReference?: () => void
+  onJump?: (ref: ManualRef) => void
+  /** Puts new questions straight into this Question Board group. */
+  groupId?: string
+  placeholder?: string
+  /** Shown above the box when there is no reference (null hides it). */
+  hint?: string | null
 }
 
 /** Sends one question, optionally tied to a manual passage. */
-export default function Composer({ reference, onClearReference, onJump }: Props) {
+export default function Composer({
+  reference = null,
+  onClearReference = () => {},
+  onJump,
+  groupId,
+  placeholder = 'What do we need to figure out or try?',
+  hint = 'Tip: select text in the manual to attach it as a reference.',
+}: Props) {
   const { name } = useSession()
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
@@ -34,6 +46,7 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
       author: name,
       createdAt: Date.now(),
       ...(reference ? { ref: reference } : {}),
+      ...(groupId ? { groupId } : {}),
     })
     setText('')
     onClearReference()
@@ -51,9 +64,9 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
     >
 
       {reference ? (
-        <RefChip reference={reference} onClick={() => onJump(reference)} onRemove={onClearReference} />
+        <RefChip reference={reference} onClick={onJump && (() => onJump(reference))} onRemove={onClearReference} />
       ) : (
-        <p className="hint muted">Tip: select text in the manual to attach it as a reference.</p>
+        hint && <p className="hint muted">{hint}</p>
       )}
 
       <textarea
@@ -67,7 +80,7 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
           }
         }}
         rows={3}
-        placeholder="What do we need to figure out or try?"
+        placeholder={placeholder}
         aria-label="Question"
       />
       <div className="composer-foot">

@@ -1,6 +1,7 @@
 import { DndContext, DragOverlay } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useMemo, useRef, useState } from 'react'
+import Composer from '../components/Composer'
 import RefChip from '../components/RefChip'
 import { DropList, Sortable } from '../components/Sortable'
 import { useLiveSort } from '../liveSort'
@@ -53,7 +54,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   // the inbox can be dragged into a column (but nothing goes back into the inbox).
   const live = useLiveSort({
     lists: {
-      ...(presenter ? { inbox: inbox.map((s) => s.id) } : {}),
+      inbox: inbox.map((s) => s.id),
       ...Object.fromEntries(STATUS.map((st) => [st.id, shown.filter((p) => p.prototype!.status === st.id).map((p) => p.id)])),
     },
     canEnter: (_id, from, to) => to !== 'inbox' || from === 'inbox',
@@ -72,38 +73,44 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
 
   return (
     <DndContext sensors={sensors} collisionDetection={cardsFirst} {...live.handlers}>
-      <div className={`proto-page${presenter ? ' with-inbox' : ''}`}>
-        {presenter && (
-          <aside className="inbox">
+      <div className="proto-page with-inbox">
+        <aside className="inbox">
             <header className="section-head">
               <h2>Prototype group</h2>
               <span className="muted">{inbox.length}</span>
             </header>
-            <p className="muted small">Questions put in the Prototype group on the Question Board. Make them prototype tasks (or drag them into a column), then assign people.</p>
+            <p className="muted small">
+              {presenter
+                ? 'Questions in the Prototype group on the Question Board. Make them prototype tasks (or drag them into a column), then assign people.'
+                : 'Questions in the Prototype group on the Question Board. The presenter turns them into prototype tasks.'}
+            </p>
+            {/* Written here, a question goes straight into the Question Board's Prototype group. */}
+            <Composer groupId={PROTOTYPE_GROUP} placeholder="What should we prototype or test?" hint={null} />
             <div className="feed">
               {inbox.length === 0 && <p className="empty muted">
                   {inGroup.length
                     ? 'Everything in the Prototype group is already a prototype.'
-                    : 'Nothing here yet. Drag questions into the Prototype group on the Question Board.'}
+                    : 'Nothing here yet. Write one above, or drag questions into the Prototype group on the Question Board.'}
                 </p>}
               {/* The inbox keeps its own order: nothing shifts in it while dragging. */}
               <SortableContext items={live.items('inbox')} strategy={() => null}>
               {live.items('inbox').map((id) => byId.get(id)!).map((s) => (
-                <Sortable key={s.id} id={s.id} enabled whole className="drag-src">
+                <Sortable key={s.id} id={s.id} enabled={presenter} whole className={presenter ? 'drag-src' : undefined}>
                   <SubmissionCard
                     submission={s}
                     actions={
-                      <button className="small primary" onPointerDown={(e) => e.stopPropagation()} onClick={() => promote(s)}>
-                        Make prototype →
-                      </button>
+                      presenter && (
+                        <button className="small primary" onPointerDown={(e) => e.stopPropagation()} onClick={() => promote(s)}>
+                          Make prototype →
+                        </button>
+                      )
                     }
                   />
                 </Sortable>
               ))}
               </SortableContext>
             </div>
-          </aside>
-        )}
+        </aside>
 
         <section className="proto-main">
           <header className="section-head wrap">

@@ -1834,6 +1834,13 @@ span.ability-name {
 .inbox > p {
   margin: 6px 0 12px;
 }
+.inbox > .composer {
+  margin: 0 14px 12px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
 .proto-main {
   min-height: 0;
   overflow-y: auto;
