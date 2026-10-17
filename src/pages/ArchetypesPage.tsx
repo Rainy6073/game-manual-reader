@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react'
 import { useIsPresenter, useLocalState } from '../session'
 import { put, remove, useCollection } from '../sync/store'
 import { newId, type Ability, type Archetype } from '../types'
+import ConfirmButton from '../components/ConfirmButton'
 
 /** Where archetypes are read from and saved to: the shared board or this device's own. */
 interface Board {
@@ -92,8 +93,8 @@ export default function ArchetypesPage() {
   const addArchetype = () =>
     board.save({ id: newId(), name: `Archetype ${board.archetypes.length + 1}`, items: [], createdAt: Date.now() })
 
+  // Replaces your board, so it asks for a second click when there is something on it.
   const copyMaster = () => {
-    if (mine.length && !confirm('Replace your board with a copy of the master board?')) return
     setMine(master.map((a) => ({ ...a, id: newId(), items: a.items.map((i) => ({ ...i, key: newId() })) })))
   }
 
@@ -121,7 +122,11 @@ export default function ArchetypesPage() {
               </button>
             </div>
           )}
-          {showingMine && <button onClick={copyMaster}>Copy master</button>}
+          {showingMine && (
+            <ConfirmButton onConfirm={copyMaster} needsConfirm={mine.length > 0} confirmLabel="Replace your board?">
+              Copy master
+            </ConfirmButton>
+          )}
           {board.editable && (
             <button className="primary" onClick={addArchetype}>
               + Archetype
@@ -238,13 +243,9 @@ function Column({ archetype, byId, abilities, board }: ColumnProps) {
           <h3>{archetype.name}</h3>
         )}
         {board.editable && (
-          <button
-            className="icon ghost"
-            aria-label={`Delete ${archetype.name}`}
-            onClick={() => confirm(`Delete “${archetype.name}”?`) && board.remove(archetype.id)}
-          >
+          <ConfirmButton className="icon ghost" aria-label={`Delete ${archetype.name}`} onConfirm={() => board.remove(archetype.id)} confirmLabel="✕">
             ✕
-          </button>
+          </ConfirmButton>
         )}
       </header>
       <div className="column-totals muted small">

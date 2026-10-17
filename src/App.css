@@ -2673,3 +2673,28 @@ button.danger-fill {
     width: 82vw;
   }
 }
+
+/* A destructive button waiting for its second click (see ConfirmButton). */
+button.armed,
+button.link.armed {
+  width: auto;
+  padding: 2px 10px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-decoration: none;
+  animation: armed-pulse 1s ease-in-out infinite alternate;
+}
+/* Icon buttons stay the same size, so the second click lands in the same place. */
+button.icon.armed {
+  padding: 4px 9px;
+  border-radius: 6px;
+}
+@keyframes armed-pulse {
+  to {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}

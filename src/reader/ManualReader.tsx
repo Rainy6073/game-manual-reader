@@ -945,10 +945,12 @@ export default function ManualReader({ source, empty, actions, onReference, jump
               }}
             >
               <h3>This manual is encrypted</h3>
-              <p className="muted">Enter the passcode FIRST released at kickoff to open it.</p>
+              <p className="muted">Enter the passcode FIRST released at kickoff. Anyone can do it, and it unlocks the manual on everyone’s screen.</p>
               <input
-                type="password"
                 autoFocus
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder="Passcode"

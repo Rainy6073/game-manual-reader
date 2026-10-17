@@ -17,6 +17,7 @@ import { clockTime, navigate } from '../nav'
 import { useIsPresenter, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useFileUrl } from '../sync/store'
 import { newId, type PrototypeStatus, type Submission } from '../types'
+import ConfirmButton from '../components/ConfirmButton'
 
 const STATUS: { id: PrototypeStatus; label: string }[] = [
   { id: 'todo', label: 'Not started' },
@@ -258,16 +259,17 @@ function PrototypeDetail({ submission: s }: { submission: Submission }) {
       <div className="detail-top">
         <button onClick={() => navigate('prototypes')}>← All prototypes</button>
         {canEdit && (
-          <button
+          <ConfirmButton
             className="link danger"
-            onClick={() => {
-              if (!confirm('Remove this from prototypes? The question/idea and its updates are kept.')) return
+            title="The question or idea and its updates are kept"
+            confirmLabel="Click again to remove"
+            onConfirm={() => {
               patch('submissions', s.id, { prototype: undefined })
               navigate('prototypes')
             }}
           >
             Remove from prototypes
-          </button>
+          </ConfirmButton>
         )}
       </div>
 
@@ -357,9 +359,9 @@ function PrototypeDetail({ submission: s }: { submission: Submission }) {
               <strong>{r.author}</strong>
               <span className="muted small">{clockTime(r.createdAt)}</span>
               {(presenter || r.author === name) && (
-                <button className="link danger small" onClick={() => confirm('Delete this update?') && remove('responses', r.id)}>
+                <ConfirmButton className="link danger small" onConfirm={() => remove('responses', r.id)} confirmLabel="Click again to delete">
                   Delete
-                </button>
+                </ConfirmButton>
               )}
             </header>
             {r.text && <p className="update-text">{r.text}</p>}

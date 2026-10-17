@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react'
 import { useIsPresenter, useLocalState } from '../session'
 import { put, useCollection, useDoc } from '../sync/store'
 import type { Ability, Priorities, PriorityTier } from '../types'
+import ConfirmButton from '../components/ConfirmButton'
 
 const TIERS: { id: PriorityTier; label: string; hint: string }[] = [
   { id: 'needs', label: 'Needs', hint: 'The robot must do these.' },
@@ -73,8 +74,8 @@ export default function NwhPage() {
     move(String(active.id), target)
   }
 
+  const mineHasItems = mine.needs.length + mine.wants.length + mine.nice.length > 0
   const copyMaster = () => {
-    if ((mine.needs.length || mine.wants.length || mine.nice.length) && !confirm('Replace your board with a copy of the master board?')) return
     setMine({ ...(master ?? empty('mine')), id: 'mine' })
   }
 
@@ -102,7 +103,11 @@ export default function NwhPage() {
               </button>
             </div>
           )}
-          {showingMine && <button onClick={copyMaster}>Copy master</button>}
+          {showingMine && (
+            <ConfirmButton onConfirm={copyMaster} needsConfirm={mineHasItems} confirmLabel="Replace your board?">
+              Copy master
+            </ConfirmButton>
+          )}
         </div>
       </header>
 

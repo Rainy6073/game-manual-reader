@@ -6,6 +6,7 @@ import { put, remove, useCollection } from '../sync/store'
 import { newId, type Submission } from '../types'
 import RefChip from './RefChip'
 import type { DragGrip } from './Sortable'
+import ConfirmButton from './ConfirmButton'
 
 interface Props {
   submission: Submission
@@ -89,9 +90,9 @@ function Answers({ submissionId, answering, onDone }: { submissionId: string; an
                 <strong>{a.author}</strong>
                 <span className="muted">{clockTime(a.createdAt)}</span>
                 {(presenter || a.author === name) && (
-                  <button className="link danger small" onClick={() => confirm('Delete this answer?') && remove('answers', a.id)}>
+                  <ConfirmButton className="link danger small" onConfirm={() => remove('answers', a.id)} confirmLabel="Click again to delete">
                     Delete
-                  </button>
+                  </ConfirmButton>
                 )}
               </span>
               <span className="answer-text">{a.text}</span>

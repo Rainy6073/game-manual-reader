@@ -6,6 +6,7 @@ import { newId, type Alliance, type BoardRobot, type BoardStroke, type FieldBoar
 import { findFieldCandidates, renderRegion } from './fieldExtract'
 import FieldPicker, { type PickedField } from './FieldPicker'
 import { saveLocalFile, useLocalFileUrl } from './localFiles'
+import ConfirmButton from '../components/ConfirmButton'
 
 type Tool = 'move' | 'pen' | 'line' | 'erase'
 
@@ -283,7 +284,6 @@ export default function FieldBoard() {
     if (name) updateBoards((list) => list.map((x) => (x.id === current.id ? { ...x, name: name.slice(0, 40) } : x)))
   }
   const deleteBoard = () => {
-    if (!confirm(`Delete the board “${current.name}”?`)) return
     const rest = boards.filter((b) => b.id !== current.id)
     updateBoards(() => (rest.length ? rest : [{ id: newId(), name: 'Board 1', board: emptyBoard(), updatedAt: Date.now() }]))
     switchTo(rest[0]?.id ?? '')
@@ -381,9 +381,9 @@ export default function FieldBoard() {
             ⧉ Duplicate
           </button>
           <button onClick={renameBoard}>Rename</button>
-          <button className="danger" onClick={deleteBoard}>
+          <ConfirmButton className="danger" onConfirm={deleteBoard} confirmLabel="Click again to delete">
             Delete
-          </button>
+          </ConfirmButton>
           <span style={{ flex: 1 }} />
           <span className="muted small" aria-live="polite">
             {copied ?? `${boards.length} ${boards.length === 1 ? 'board' : 'boards'} saved on this device`}
@@ -463,18 +463,12 @@ export default function FieldBoard() {
             <button onClick={undo} title="Undo (⌘Z / Ctrl+Z)">
               ↶ Undo
             </button>
-            <button
-              onClick={() => stored.strokes.length && confirm('Erase all drawings?') && commit({ ...stored, strokes: [] })}
-              disabled={!stored.strokes.length}
-            >
+            <ConfirmButton onConfirm={() => commit({ ...stored, strokes: [] })} disabled={!stored.strokes.length} confirmLabel="Clear all lines?">
               Clear lines
-            </button>
-            <button
-              onClick={() => stored.robots.length && confirm('Remove all robots?') && commit({ ...stored, robots: [] })}
-              disabled={!stored.robots.length}
-            >
+            </ConfirmButton>
+            <ConfirmButton onConfirm={() => commit({ ...stored, robots: [] })} disabled={!stored.robots.length} confirmLabel="Clear all robots?">
               Clear robots
-            </button>
+            </ConfirmButton>
           </>
         )}
         <span style={{ flex: 1 }} />

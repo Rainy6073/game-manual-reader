@@ -3,6 +3,7 @@ import { loadPdf } from '../reader/pdf'
 import { useLocalState } from '../session'
 import { resolveFileUrl, useDoc } from '../sync/store'
 import { blankModel, findPointTable, newRowId, newRuleId, type Metric, type RpRule, type ScoreRow, type ScoringModel } from './pointTable'
+import ConfirmButton from '../components/ConfirmButton'
 
 interface Team {
   id: string
@@ -187,9 +188,9 @@ export default function ScoreCalculator() {
             {editing ? 'Done editing' : 'Edit scoring'}
           </button>
           {manual && (
-            <button onClick={() => confirm('Replace the scoring table with a fresh reading of the manual?') && readManual()} disabled={reading}>
+            <ConfirmButton onConfirm={readManual} disabled={reading} confirmLabel="Replace scoring? Click again" title="Replace the scoring table with a fresh reading of the manual">
               {reading ? 'Reading…' : 'Re-read manual'}
-            </button>
+            </ConfirmButton>
           )}
           <button onClick={() => setTeams((ts) => ts.map((t) => ({ ...t, counts: {}, checked: {} })))}>Clear counts</button>
           {defaultTeams()

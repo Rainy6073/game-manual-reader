@@ -11,6 +11,7 @@ import { isPasswordError, loadPdf } from '../reader/pdf'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useDoc, useFileUrl } from '../sync/store'
 import { newId, type SubmissionKind } from '../types'
+import ConfirmButton from '../components/ConfirmButton'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
 
@@ -34,12 +35,6 @@ function useWide() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
   return wide
-}
-
-/** An encrypted PDF waiting for its passcode before it is uploaded. */
-interface PendingUpload {
-  file: File
-  wrong: boolean
 }
 
 export default function ManualPage() {
@@ -84,8 +79,6 @@ export default function ManualPage() {
   const board = boardOpen && wide
   const pageRef = useRef<HTMLDivElement>(null)
   const [uploading, setUploading] = useState(false)
-  const [pending, setPending] = useState<PendingUpload | null>(null)
-  const [passcode, setPasscode] = useState('')
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -141,7 +134,8 @@ export default function ManualPage() {
     handle.addEventListener('pointercancel', up)
   }
 
-  // Remember the passcode for everyone once someone has unlocked the shared manual.
+  // Whoever types the right passcode unlocks the shared manual for everyone:
+  // it is saved with the manual, and every screen reopens it with it.
   const savePassword = useCallback(
     (password: string) => {
       if (manual && manual.password !== password) patch('meta', 'manual', { password })
@@ -149,32 +143,22 @@ export default function ManualPage() {
     [manual],
   )
 
-  /** Checks the file opens (with the passcode, if encrypted), then shares it. */
-  const upload = async (file: File, password?: string) => {
+  /**
+   * Checks the file is a PDF, then shares it. An encrypted manual is shared still
+   * locked; anyone can unlock it for everyone once the passcode is out.
+   */
+  const upload = async (file: File) => {
     setUploadError(null)
     setUploading(true)
     try {
       try {
-        const doc = await loadPdf(await file.arrayBuffer(), password)
+        const doc = await loadPdf(await file.arrayBuffer())
         doc.loadingTask.destroy()
       } catch (err) {
-        if (isPasswordError(err)) {
-          setPending({ file, wrong: !!password })
-          return
-        }
-        throw err
+        if (!isPasswordError(err)) throw err
       }
       const url = await uploadFile(file, file.name)
-      put('meta', {
-        id: 'manual',
-        url,
-        name: file.name.replace(/\.pdf$/i, ''),
-        ...(password ? { password } : {}),
-        uploadedBy: name,
-        uploadedAt: Date.now(),
-      })
-      setPending(null)
-      setPasscode('')
+      put('meta', { id: 'manual', url, name: file.name.replace(/\.pdf$/i, ''), uploadedBy: name, uploadedAt: Date.now() })
     } catch (err) {
       console.error(err)
       setUploadError('Could not upload that file. Make sure it is a valid PDF.')
@@ -218,13 +202,14 @@ export default function ManualPage() {
         {uploading ? 'Uploading…' : manual ? 'Replace manual' : 'Upload manual'}
       </button>
       {manual && manual.url !== SAMPLE.url && (
-        <button
-          onClick={() => confirm('Switch everyone back to the bundled 2026 manual?') && shareSample()}
+        <ConfirmButton
+          onConfirm={shareSample}
           disabled={uploading}
-          title="Switch back to the bundled 2026 manual"
+          confirmLabel="Switch everyone? Click again"
+          title="Switch everyone back to the bundled 2026 manual"
         >
           Use 2026 manual
-        </button>
+        </ConfirmButton>
       )}
       <input
         ref={fileInputRef}
@@ -327,14 +312,9 @@ export default function ManualPage() {
                   answerable
                   actions={
                     (presenter || s.author === name) && (
-                      <button
-                        className="link danger"
-                        onClick={() => {
-                          if (confirm('Delete this submission?')) remove('submissions', s.id)
-                        }}
-                      >
+                      <ConfirmButton className="link danger" onConfirm={() => remove('submissions', s.id)} confirmLabel="Click again to delete">
                         Delete
-                      </button>
+                      </ConfirmButton>
                     )
                   }
                 />
@@ -388,7 +368,7 @@ export default function ManualPage() {
               ) : presenter ? (
                 <>
                   <h3>Upload this year’s game manual</h3>
-                  <p className="muted">Encrypted PDFs are fine; you’ll be asked for the passcode. Everyone’s screen opens it automatically.</p>
+                  <p className="muted">Encrypted PDFs are fine, even before the passcode is out: once anyone types it in, it unlocks for everyone. Everyone’s screen opens it automatically.</p>
                   <div className="row">
                     {uploadButton}
                     <button onClick={shareSample}>Use 2026 manual</button>
@@ -410,33 +390,6 @@ export default function ManualPage() {
       {noteDraft && <NoteEditor key={noteDraft.note?.id ?? 'new'} draft={noteDraft} author={name} onClose={() => setNoteDraft(null)} onAsk={addReference} />}
       {attaching && <AttachPicker reference={attaching} submissions={submissions} onClose={() => setAttaching(null)} />}
 
-      {pending && (
-        <div className="modal-backdrop" onClick={() => !uploading && setPending(null)}>
-          <form
-            className="modal"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (passcode) upload(pending.file, passcode)
-            }}
-          >
-            <h3>Enter the manual passcode</h3>
-            <p className="muted">
-              <strong>{pending.file.name}</strong> is encrypted. The passcode is saved with the manual so every screen opens it.
-            </p>
-            <input type="password" autoFocus value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="Passcode" />
-            {pending.wrong && <p className="error-text">That passcode didn’t work.</p>}
-            <div className="row end">
-              <button type="button" onClick={() => setPending(null)} disabled={uploading}>
-                Cancel
-              </button>
-              <button className="primary" disabled={!passcode || uploading}>
-                {uploading ? 'Uploading…' : 'Unlock & share'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
     </div>
   )
 }

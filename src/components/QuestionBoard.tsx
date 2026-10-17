@@ -8,6 +8,7 @@ import Composer from './Composer'
 import { byRank, cardsFirst, reorderOnDrop, useCardSensors } from '../reorder'
 import { DropList, Sortable } from './Sortable'
 import SubmissionCard from './SubmissionCard'
+import ConfirmButton from './ConfirmButton'
 
 type GroupBy = 'type' | 'custom' | 'page' | 'person' | 'status'
 type Sort = 'custom' | 'newest' | 'oldest'
@@ -100,8 +101,8 @@ export default function QuestionBoard({ submissions, reference, onClearReference
     put('groups', { id: newId(), name: n.slice(0, 60), createdAt: Date.now() })
     setNewGroup('')
   }
+  // Its cards go back to "Not grouped".
   const deleteGroup = (g: Group) => {
-    if (!confirm(`Delete the group “${g.title}”? Its ${g.items.length} cards go back to Not grouped.`)) return
     for (const s of submissions) if (s.groupId === g.key) patch('submissions', s.id, { groupId: undefined })
     remove('groups', g.key)
   }
@@ -219,9 +220,15 @@ export default function QuestionBoard({ submissions, reference, onClearReference
               )}
               <span className="count-pill">{g.items.length}</span>
               {groupBy === 'custom' && g.key !== UNGROUPED && (
-                <button className="icon ghost" onClick={() => deleteGroup(g)} aria-label={`Delete group ${g.title}`} title="Delete group">
+                <ConfirmButton
+                  className="icon ghost"
+                  onConfirm={() => deleteGroup(g)}
+                  confirmLabel="✕"
+                  aria-label={`Delete group ${g.title}`}
+                  title="Delete group (its cards go back to Not grouped)"
+                >
                   ✕
-                </button>
+                </ConfirmButton>
               )}
             </header>
             <div className="board-cards">
@@ -245,9 +252,9 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                         </button>
                       )}
                       {(presenter || s.author === name) && (
-                        <button className="link danger" onClick={() => confirm('Delete this submission?') && remove('submissions', s.id)}>
+                        <ConfirmButton className="link danger" onConfirm={() => remove('submissions', s.id)} confirmLabel="Click again to delete">
                           Delete
-                        </button>
+                        </ConfirmButton>
                       )}
                     </>
                   }

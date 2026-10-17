@@ -4,6 +4,7 @@ import { patch, put, remove } from '../sync/store'
 import { newId, type ManualNoteDoc, type Submission } from '../types'
 import { byRank } from '../reorder'
 import RefChip from './RefChip'
+import ConfirmButton from './ConfirmButton'
 
 /** A note being written or edited, shown next to its passage. */
 export type NoteDraft = { at: ScreenPoint } & ({ ref: ManualRef; note?: undefined } | { note: ManualNoteDoc; ref?: undefined })
@@ -144,9 +145,9 @@ export function NotesList({ notes, onJump, onEdit }: { notes: ManualNoteDoc[]; o
             >
               {n.text ? 'Edit' : 'Add note'}
             </button>
-            <button className="link danger" onClick={() => confirm(n.text ? 'Delete this note?' : 'Remove this highlight?') && remove('notes', n.id)}>
+            <ConfirmButton className="link danger" onConfirm={() => remove('notes', n.id)} confirmLabel="Click again to delete">
               Delete
-            </button>
+            </ConfirmButton>
           </footer>
         </article>
       ))}

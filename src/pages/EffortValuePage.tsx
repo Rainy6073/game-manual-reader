@@ -5,6 +5,7 @@ import { FIB } from '../fib'
 import { useIsPresenter } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
 import { newId } from '../types'
+import ConfirmButton from '../components/ConfirmButton'
 
 export default function EffortValuePage() {
   const presenter = useIsPresenter()
@@ -83,13 +84,15 @@ export default function EffortValuePage() {
                   />
                   <FibInput label="Effort" value={a.effort} onChange={(effort) => patch('abilities', a.id, { effort })} />
                   <FibInput label="Value" value={a.value} onChange={(value) => patch('abilities', a.id, { value })} />
-                  <button
+                  <ConfirmButton
                     className="icon ghost"
                     aria-label={`Delete ${a.name}`}
-                    onClick={() => confirm(`Delete “${a.name}”? It will also be removed from archetypes.`) && remove('abilities', a.id)}
+                    title="Delete (also removes it from archetypes)"
+                    onConfirm={() => remove('abilities', a.id)}
+                    confirmLabel="✕"
                   >
                     ✕
-                  </button>
+                  </ConfirmButton>
                 </>
               ) : (
                 <>
