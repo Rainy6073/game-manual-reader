@@ -12,7 +12,7 @@ const VIEWS: { role: Role; title: string; text: string }[] = [
   {
     role: 'standard',
     title: 'Standard',
-    text: 'For your own laptop or phone. Read the manual, send questions and ideas, follow along live, and report prototype results.',
+    text: 'For your own laptop or phone. Read the manual, send questions, follow along live, and report prototype results.',
   },
 ]
 

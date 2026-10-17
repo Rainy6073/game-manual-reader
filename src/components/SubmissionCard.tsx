@@ -19,12 +19,12 @@ interface Props {
 }
 
 export default function SubmissionCard({ submission: s, onJump, actions, answerable, grip }: Props) {
-  const canAnswer = answerable && s.kind === 'question'
+  const canAnswer = !!answerable
   const [answering, setAnswering] = useState(false)
 
   return (
     <article
-      className={`submission ${s.kind}${canAnswer ? ' answerable' : ''}${answering ? ' answering' : ''}`}
+      className={`submission${canAnswer ? ' answerable' : ''}${answering ? ' answering' : ''}`}
       onClick={(e) => {
         // Clicking anywhere on a question (but not its buttons, links or fields) opens the answer box.
         if (!canAnswer || answering || (e.target as HTMLElement).closest('button, a, input, textarea, select, .ref-chip')) return
@@ -37,7 +37,6 @@ export default function SubmissionCard({ submission: s, onJump, actions, answera
             ⠿
           </span>
         )}
-        <span className={`kind-badge ${s.kind}`}>{s.kind === 'question' ? 'Question' : 'Idea'}</span>
         {s.prototype && <span className="kind-badge proto">Prototype</span>}
         <span className="muted byline">
           {s.author} · {clockTime(s.createdAt)}

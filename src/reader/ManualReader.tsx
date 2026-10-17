@@ -38,7 +38,7 @@ interface Loaded {
   sizes: { width: number; height: number }[]
 }
 
-/** A passage of the manual someone selected, to attach to a question or idea. */
+/** A passage of the manual someone selected, to attach to a question. */
 export interface ManualRef {
   page: number
   quote: string
@@ -80,7 +80,7 @@ interface Props {
   onNote?: (ref: ManualRef, at: ScreenPoint) => void
   /** Saves selected text as a plain highlight. */
   onHighlight?: (ref: ManualRef) => void
-  /** Attaches selected text to an existing question or idea. */
+  /** Attaches selected text to an existing question. */
   onAttach?: (ref: ManualRef) => void
   /** Called when someone clicks one of their highlights or notes. */
   onOpenNote?: (id: string, at: ScreenPoint) => void
@@ -884,9 +884,9 @@ export default function ManualReader({ source, empty, actions, onReference, jump
                 onReference({ page: selection.page, quote: selection.quote })
                 takeSelection()
               }}
-              title="Ask a question or suggest an idea about this (Q)"
+              title="Ask a question about this (Q)"
             >
-              ＋ Question / idea
+              ＋ Question
             </button>
             {onAttach && (
               <button
@@ -894,7 +894,7 @@ export default function ManualReader({ source, empty, actions, onReference, jump
                   onAttach({ page: selection.page, quote: selection.quote })
                   takeSelection()
                 }}
-                title="Attach this passage to a question or idea that already exists"
+                title="Attach this passage to a question that already exists"
               >
                 Add to question…
               </button>

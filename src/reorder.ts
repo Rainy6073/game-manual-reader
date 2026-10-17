@@ -1,4 +1,4 @@
-// Shared, hand-arranged order for questions, ideas and prototypes. Each submission
+// Shared, hand-arranged order for questions and prototypes. Each submission
 // has a rank (its `order`, or minus its creation time when never moved), so new
 // submissions still appear first and moving one only rewrites that one record.
 import {

@@ -3,14 +3,14 @@ import { useMemo, useState } from 'react'
 import type { ManualRef } from '../reader/ManualReader'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
-import { newId, type BoardGroup, type Submission, type SubmissionKind } from '../types'
+import { newId, type BoardGroup, type Submission } from '../types'
 import Composer from './Composer'
 import { byRank, cardsFirst, reorderOnDrop, useCardSensors } from '../reorder'
 import { DropList, Sortable } from './Sortable'
 import SubmissionCard from './SubmissionCard'
 import ConfirmButton from './ConfirmButton'
 
-type GroupBy = 'type' | 'custom' | 'page' | 'person' | 'status'
+type GroupBy = 'custom' | 'page' | 'person' | 'status'
 type Sort = 'custom' | 'newest' | 'oldest'
 type Show = 'all' | 'mine'
 
@@ -21,7 +21,6 @@ interface Group {
 }
 
 const GROUPINGS: { id: GroupBy; label: string }[] = [
-  { id: 'type', label: 'Type' },
   { id: 'custom', label: 'Our groups' },
   { id: 'page', label: 'Manual page' },
   { id: 'person', label: 'Person' },
@@ -36,7 +35,6 @@ function groupOf(s: Submission, by: GroupBy, custom: Map<string, BoardGroup>): [
     const g = s.groupId ? custom.get(s.groupId) : undefined
     return g ? [g.id, g.name] : [UNGROUPED, 'Not grouped']
   }
-  if (by === 'type') return [s.kind, s.kind === 'question' ? 'Questions' : 'Prototyping ideas']
   if (by === 'person') return [s.author.toLowerCase(), s.author]
   if (by === 'status') return s.prototype ? ['proto', 'Made into prototypes'] : ['open', 'Not yet a prototype']
   if (s.ref) return [String(s.ref.page).padStart(5, '0'), `Page ${s.ref.page}`]
@@ -60,16 +58,6 @@ function groupSubmissions(list: Submission[], by: GroupBy, custom: Map<string, B
       ...ordered.map((g) => groups.get(g.id) ?? { key: g.id, title: g.name, items: [] }),
     ]
   }
-  if (by === 'type') {
-    // Always show both columns, even when one is empty.
-    for (const [key, title] of [
-      ['question', 'Questions'],
-      ['idea', 'Prototyping ideas'],
-    ] as const) {
-      if (!groups.has(key)) result.push({ key, title, items: [] })
-    }
-    return result.sort((a, b) => (a.key === 'question' ? -1 : b.key === 'question' ? 1 : 0))
-  }
   if (by === 'person') return result.sort((a, b) => b.items.length - a.items.length || a.title.localeCompare(b.title))
   // Plain comparison, so zero-padded page numbers sort numerically and "~none" sorts last.
   return result.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
@@ -84,11 +72,12 @@ interface Props {
   onClose: () => void
 }
 
-/** A wide, organized view of every question and prototyping idea. */
+/** A wide, organized view of every question. */
 export default function QuestionBoard({ submissions, reference, onClearReference, onJump, onClose }: Props) {
   const presenter = useIsPresenter()
   const { name } = useSession()
-  const [groupBy, setGroupBy] = useLocalState<GroupBy>('kickoff.boardGroup', 'type')
+  const [savedGroupBy, setGroupBy] = useLocalState<GroupBy>('kickoff.boardGroup', 'custom')
+  const groupBy: GroupBy = GROUPINGS.some((g) => g.id === savedGroupBy) ? savedGroupBy : 'custom'
   const [sort, setSort] = useLocalState<Sort>('kickoff.boardOrder', 'custom')
   const [show, setShow] = useState<Show>('all')
   const [query, setQuery] = useState('')
@@ -117,13 +106,12 @@ export default function QuestionBoard({ submissions, reference, onClearReference
   }, [submissions, show, name, query, sort, groupBy, custom])
 
   // Anyone can drag cards into the shared order (in "Custom order"), and between
-  // columns where that means something: Questions ↔ Ideas, or into a group.
+  // groups (with "Our groups").
   const canReorder = sort === 'custom'
   const ranked = useMemo(() => [...submissions].sort(byRank), [submissions])
   const [dragging, setDragging] = useState<string | null>(null)
   const sensors = useCardSensors()
   const regroup = (_: Submission, key: string): Partial<Submission> | null => {
-    if (groupBy === 'type') return { kind: key as SubmissionKind }
     if (groupBy === 'custom') return { groupId: key === UNGROUPED ? undefined : key }
     return null
   }
@@ -146,8 +134,8 @@ export default function QuestionBoard({ submissions, reference, onClearReference
             className="board-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search questions & ideas"
-            aria-label="Search questions and ideas"
+            placeholder="Search questions"
+            aria-label="Search questions"
           />
           <label className="board-select">
             <span className="muted small">Group by</span>
@@ -183,7 +171,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
       </header>
 
       <details className="board-compose" open={!!reference || undefined}>
-        <summary>＋ Ask a question or suggest an idea</summary>
+        <summary>＋ Ask a question</summary>
         <Composer reference={reference} onClearReference={onClearReference} onJump={onJump} />
       </details>
 
@@ -198,7 +186,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
         }}
       >
       <div className={`board-columns${groups.length <= 3 ? ' wide' : ''}`}>
-        {groups.length === 0 && <p className="empty muted">{query ? 'Nothing matches your search.' : 'No questions or ideas yet.'}</p>}
+        {groups.length === 0 && <p className="empty muted">{query ? 'Nothing matches your search.' : 'No questions yet.'}</p>}
         {groups.map((g) => (
           <DropList key={g.key} group={g.key} enabled={canReorder} className={`board-column group-${groupBy} key-${g.key}`}>
             <header>
@@ -243,14 +231,6 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                   answerable
                   actions={
                     <>
-                      {presenter && !s.prototype && (
-                        <button
-                          className="small"
-                          onClick={() => patch('submissions', s.id, { prototype: { assignees: [], status: 'todo', createdAt: Date.now() } })}
-                        >
-                          Make prototype
-                        </button>
-                      )}
                       {(presenter || s.author === name) && (
                         <ConfirmButton className="link danger" onConfirm={() => remove('submissions', s.id)} confirmLabel="Click again to delete">
                           Delete
@@ -274,7 +254,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
             }}
           >
             <h3>New group</h3>
-            <p className="muted small">Collect similar questions and ideas together. Everyone sees the same groups.</p>
+            <p className="muted small">Collect similar questions together. Everyone sees the same groups.</p>
             <input value={newGroup} onChange={(e) => setNewGroup(e.target.value)} placeholder="e.g. Climbing" aria-label="New group name" />
             <button className="primary" disabled={!newGroup.trim()}>
               + Add group

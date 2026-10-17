@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ManualRef } from '../reader/ManualReader'
 import { useSession } from '../session'
 import { put } from '../sync/store'
-import { newId, type SubmissionKind } from '../types'
+import { newId } from '../types'
 import RefChip from './RefChip'
 
 interface Props {
@@ -11,10 +11,9 @@ interface Props {
   onJump: (ref: ManualRef) => void
 }
 
-/** Sends one question or prototyping idea, optionally tied to a manual passage. */
+/** Sends one question, optionally tied to a manual passage. */
 export default function Composer({ reference, onClearReference, onJump }: Props) {
   const { name } = useSession()
-  const [kind, setKind] = useState<SubmissionKind>('question')
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -30,7 +29,7 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
     if (!trimmed) return
     put('submissions', {
       id: newId(),
-      kind,
+      kind: 'question',
       text: trimmed,
       author: name,
       createdAt: Date.now(),
@@ -50,14 +49,6 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
         submit()
       }}
     >
-      <div className="segmented" role="radiogroup" aria-label="Type">
-        <button type="button" role="radio" aria-checked={kind === 'question'} onClick={() => setKind('question')}>
-          Question
-        </button>
-        <button type="button" role="radio" aria-checked={kind === 'idea'} onClick={() => setKind('idea')}>
-          Prototyping idea
-        </button>
-      </div>
 
       {reference ? (
         <RefChip reference={reference} onClick={() => onJump(reference)} onRemove={onClearReference} />
@@ -76,15 +67,15 @@ export default function Composer({ reference, onClearReference, onJump }: Props)
           }
         }}
         rows={3}
-        placeholder={kind === 'question' ? 'What do we need to figure out?' : 'What should we prototype?'}
-        aria-label={kind === 'question' ? 'Question' : 'Prototyping idea'}
+        placeholder="What do we need to figure out or try?"
+        aria-label="Question"
       />
       <div className="composer-foot">
         <span className="muted" aria-live="polite">
           {sent ? 'Sent ✓' : ''}
         </span>
         <button className="primary" disabled={!text.trim()}>
-          Submit {kind === 'question' ? 'question' : 'idea'}
+          Submit question
         </button>
       </div>
     </form>

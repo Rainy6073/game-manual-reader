@@ -53,7 +53,7 @@ export default function ResetData() {
             ) : (
               <>
                 <p className="muted">
-                  Permanently deletes every question, idea, ability, archetype, prototype, update and the shared manual, for everyone. This
+                  Permanently deletes every question, ability, archetype, prototype, update and the shared manual, for everyone. This
                   can’t be undone.
                 </p>
                 <input

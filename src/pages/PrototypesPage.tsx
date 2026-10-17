@@ -83,10 +83,10 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
         {presenter && (
           <aside className="inbox">
             <header className="section-head">
-              <h2>From brainstorming</h2>
+              <h2>Questions</h2>
               <span className="muted">{inbox.length}</span>
             </header>
-            <p className="muted small">Turn questions and ideas into prototype tasks (or drag them into a column), then assign people to them.</p>
+            <p className="muted small">Turn questions into prototype tasks (or drag them into a column), then assign people to them.</p>
             <div className="feed">
               {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
               {inbox.map((s) => (
@@ -130,8 +130,8 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
           {prototypes.length === 0 && (
             <p className="empty muted">
               {presenter
-                ? 'Pick questions and ideas from the left to make them official prototypes.'
-                : 'No prototypes yet. The presenter will create them from the team’s questions and ideas.'}
+                ? 'Pick questions from the left to make them official prototypes.'
+                : 'No prototypes yet. The presenter will create them from the team’s questions.'}
             </p>
           )}
 
@@ -204,7 +204,7 @@ function ProtoCard({ p, updates }: { p: Submission; updates: number }) {
   return (
     <button className={`proto-card status-${p.prototype!.status}`} onClick={() => navigate(`prototypes/${p.id}`)}>
       <span className="proto-card-top">
-        <span className={`kind-badge ${p.kind}`}>{p.kind === 'question' ? 'Question' : 'Idea'}</span>
+        <span className="muted small">{p.author}</span>
         <span className={`status-pill ${p.prototype!.status}`}>{statusLabel(p.prototype!.status)}</span>
       </span>
       <span className="proto-title">{p.text}</span>
@@ -261,7 +261,7 @@ function PrototypeDetail({ submission: s }: { submission: Submission }) {
         {canEdit && (
           <ConfirmButton
             className="link danger"
-            title="The question or idea and its updates are kept"
+            title="The question and its updates are kept"
             confirmLabel="Click again to remove"
             onConfirm={() => {
               patch('submissions', s.id, { prototype: undefined })
@@ -275,7 +275,6 @@ function PrototypeDetail({ submission: s }: { submission: Submission }) {
 
       <section className="detail-card">
         <div className="row">
-          <span className={`kind-badge ${s.kind}`}>{s.kind === 'question' ? 'Question' : 'Idea'}</span>
           <span className="muted small">
             from {s.author} · {clockTime(s.createdAt)}
           </span>

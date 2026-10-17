@@ -2,11 +2,12 @@ import type { ManualRef } from './reader/ManualReader'
 
 export type Role = 'presenter' | 'standard'
 
+/** Everything is a question now; 'idea' only appears on older records. */
 export type SubmissionKind = 'question' | 'idea'
 
 export type PrototypeStatus = 'todo' | 'active' | 'done'
 
-/** A question or prototyping idea sent from the Game Manual page. */
+/** A question sent from the Game Manual page (it can become a prototype). */
 export interface Submission {
   id: string
   kind: SubmissionKind
@@ -35,6 +36,18 @@ export interface Ability {
   name: string
   effort: number | null
   value: number | null
+  createdAt: number
+  /** Position in the presenter's list; unset keeps creation order. */
+  order?: number
+}
+
+/** A rating someone suggests for an ability, waiting for the presenter to review. */
+export interface Proposal {
+  id: string
+  abilityId: string
+  author: string
+  effort: number
+  value: number
   createdAt: number
 }
 
@@ -116,6 +129,8 @@ export interface BoardRobot {
   y: number
   alliance: Alliance
   label: string
+  /** Which way it faces, in degrees clockwise from facing up. */
+  angle?: number
 }
 
 /** A drawn line or path; points are fractions of the image's width/height. */
@@ -154,6 +169,7 @@ export interface Collections {
   answers: Answer
   notes: ManualNoteDoc
   groups: BoardGroup
+  proposals: Proposal
   meta: ManualMeta
   priorities: Priorities
 }

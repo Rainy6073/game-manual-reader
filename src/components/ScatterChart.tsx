@@ -9,7 +9,15 @@ interface Props {
   onHighlight: (id: string | null) => void
   /** When set, markers, names and unrated abilities can be dragged onto Fibonacci points. */
   onRate?: (ids: string[], effort: number, value: number) => void
+  /** A suggested rating, drawn as a dashed point (with an arrow from the current one). */
+  proposal?: { abilityId: string; effort: number | null; value: number | null }
+  /** When set, clicking the chart or dragging the dashed point moves the suggestion. */
+  onPropose?: (effort: number, value: number) => void
+  /** Called when someone clicks an ability's point or name. */
+  onPick?: (id: string) => void
 }
+
+const PROPOSAL = '__proposal'
 
 /** A marker, name or unrated ability being dragged; x/y are relative to the chart box. */
 interface Drag {
@@ -61,7 +69,7 @@ function textWidth(text: string, font: string) {
  * placed where it doesn't cover other names or markers (with a leader line when it
  * has to move away from its marker).
  */
-export default function ScatterChart({ abilities, highlight, onHighlight, onRate }: Props) {
+export default function ScatterChart({ abilities, highlight, onHighlight, onRate, proposal, onPropose, onPick }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 600, height: 400 })
   const presenter = useIsPresenter()
@@ -104,7 +112,7 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
   const snap = drag?.moved ? snapAt(drag.x, drag.y) : null
 
   const startDrag = (e: React.PointerEvent, ids: string[], name: string) => {
-    if (!onRate || e.button !== 0) return
+    if (e.button !== 0 || (ids[0] === PROPOSAL ? !onPropose : !onRate)) return
     e.preventDefault()
     const box = boxRef.current!.getBoundingClientRect()
     const d = { ids, name, startX: e.clientX - box.left, startY: e.clientY - box.top, x: e.clientX - box.left, y: e.clientY - box.top, moved: false }
@@ -134,7 +142,9 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
       if (!d?.moved || e.type === 'pointercancel') return
       const [px, py] = toBox(e)
       const target = snapAt(px, py)
-      if (target) onRate?.(d.ids, target.effort, target.value)
+      if (!target) return
+      if (d.ids[0] === PROPOSAL) onPropose?.(target.effort, target.value)
+      else onRate?.(d.ids, target.effort, target.value)
     }
     // Stop the page from scrolling under a finger that is dragging.
     const noScroll = (e: TouchEvent) => e.preventDefault()
@@ -227,25 +237,36 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
 
   return (
     <>
-      <div className={`chart${onRate ? ' editable' : ''}${drag?.moved ? ' dragging' : ''}`} ref={boxRef}>
+      <div className={`chart${onRate ? ' editable' : ''}${onPropose ? ' proposing' : ''}${onPick ? ' pickable' : ''}${drag?.moved ? ' dragging' : ''}`} ref={boxRef}>
         <svg width={size.width} height={size.height} role="img" aria-label="Effort versus value scatter plot">
-          {/* Quadrants */}
-          <rect className="quad win" x={LEFT} y={TOP} width={plotW / 2} height={plotH / 2} />
-          <rect className="quad bet" x={midX} y={TOP} width={plotW / 2} height={plotH / 2} />
-          <rect className="quad easy" x={LEFT} y={midY} width={plotW / 2} height={plotH / 2} />
-          <rect className="quad avoid" x={midX} y={midY} width={plotW / 2} height={plotH / 2} />
-          <text className="quad-label" x={LEFT + 8} y={TOP + 20}>
-            Quick wins
-          </text>
-          <text className="quad-label" x={LEFT + plotW - 8} y={TOP + 20} textAnchor="end">
-            Big bets
-          </text>
-          <text className="quad-label" x={LEFT + 8} y={TOP + plotH - 8}>
-            Nice extras
-          </text>
-          <text className="quad-label" x={LEFT + plotW - 8} y={TOP + plotH - 8} textAnchor="end">
-            Money pits
-          </text>
+          {/* Low effort & high value (top left) shades green, high effort & low value
+              (bottom right) red, each fading to white toward the middle. */}
+          <defs>
+            <linearGradient id="ev-good" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#18a058" stopOpacity="0.32" />
+              <stop offset="1" stopColor="#18a058" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="ev-bad" x1="1" y1="1" x2="0" y2="0">
+              <stop offset="0" stopColor="#d0101b" stopOpacity="0.26" />
+              <stop offset="1" stopColor="#d0101b" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <rect
+            className="plot-bg"
+            x={LEFT}
+            y={TOP}
+            width={plotW}
+            height={plotH}
+            onClick={(e) => {
+              // Proposing: a click anywhere puts the suggestion on the nearest point.
+              if (!onPropose) return
+              const box = boxRef.current!.getBoundingClientRect()
+              const target = snapAt(e.clientX - box.left, e.clientY - box.top)
+              if (target) onPropose(target.effort, target.value)
+            }}
+          />
+          <rect x={LEFT} y={TOP} width={plotW / 2} height={plotH / 2} fill="url(#ev-good)" pointerEvents="none" />
+          <rect x={midX} y={midY} width={plotW / 2} height={plotH / 2} fill="url(#ev-bad)" pointerEvents="none" />
 
           {/* Grid & ticks */}
           {ticks.map((t) => (
@@ -290,6 +311,7 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
                 r={radius(g.items.length)}
                 onPointerEnter={() => onHighlight(g.items[0].id)}
                 onPointerLeave={() => onHighlight(null)}
+                onClick={() => onPick?.(g.items[0].id)}
               />
               {g.items.length > 1 && (
                 <text x={x(g.effort)} y={y(g.value) + 4} textAnchor="middle" className="marker-count">
@@ -318,6 +340,49 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
               )}
             </g>
           ))}
+
+          {/* The suggested rating: dashed, with an arrow from where it is now. */}
+          {proposal &&
+            proposal.effort != null &&
+            proposal.value != null &&
+            (() => {
+              const current = abilities.find((a) => a.id === proposal.abilityId)
+              const px = x(proposal.effort)
+              const py = y(proposal.value)
+              const fromX = current?.effort != null && current.value != null ? x(current.effort) : null
+              const fromY = current?.effort != null && current.value != null ? y(current.value) : null
+              return (
+                <g className={`proposal${drag?.moved && drag.ids[0] === PROPOSAL ? ' lifting' : ''}`}>
+                  <defs>
+                    <marker id="proposal-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M0 0 10 5 0 10z" className="proposal-arrowhead" />
+                    </marker>
+                  </defs>
+                  {fromX != null && fromY != null && Math.hypot(px - fromX, py - fromY) > 20 && (
+                    <line
+                      className="proposal-line"
+                      x1={fromX}
+                      y1={fromY}
+                      x2={px - ((px - fromX) / Math.hypot(px - fromX, py - fromY)) * 14}
+                      y2={py - ((py - fromY) / Math.hypot(px - fromX, py - fromY)) * 14}
+                      markerEnd="url(#proposal-arrow)"
+                    />
+                  )}
+                  <circle className="proposal-dot" cx={px} cy={py} r={10} />
+                  {onPropose && (
+                    <circle
+                      className="grab"
+                      cx={px}
+                      cy={py}
+                      r={18}
+                      onPointerDown={(e) => startDrag(e, [PROPOSAL], 'Proposed rating')}
+                    >
+                      <title>Drag to change the proposed rating</title>
+                    </circle>
+                  )}
+                </g>
+              )
+            })()}
 
           {/* While dragging: every point it can land on, and where it will land. */}
           {drag?.moved && (
@@ -363,6 +428,7 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
                   onPointerEnter={() => onHighlight(a.id)}
                   onPointerLeave={() => onHighlight(null)}
                   onPointerDown={(e) => startDrag(e, [a.id], a.name)}
+                  onClick={() => onPick?.(a.id)}
                 >
                   {a.name}
                 </span>

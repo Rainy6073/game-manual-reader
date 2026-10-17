@@ -71,7 +71,7 @@ export function NoteEditor({ draft, author, onClose, onAsk }: { draft: NoteDraft
               onAsk(ref)
               onClose()
             }}
-            title="Start a question or idea with this passage attached"
+            title="Start a question with this passage attached"
           >
             Ask about it
           </button>
@@ -86,7 +86,7 @@ export function NoteEditor({ draft, author, onClose, onAsk }: { draft: NoteDraft
   )
 }
 
-/** Picks a question or idea to attach a passage to. */
+/** Picks a question to attach a passage to. */
 export function AttachPicker({ reference, submissions, onClose }: { reference: ManualRef; submissions: Submission[]; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const list = useMemo(() => {
@@ -106,12 +106,12 @@ export function AttachPicker({ reference, submissions, onClose }: { reference: M
       <div className="modal attach-picker" onClick={(e) => e.stopPropagation()}>
         <h3>Add this passage to…</h3>
         <RefChip reference={reference} />
-        <input type="search" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search questions & ideas" aria-label="Search questions and ideas" />
+        <input type="search" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search questions" aria-label="Search questions" />
         <div className="attach-list">
-          {list.length === 0 && <p className="muted small">{submissions.length ? 'Nothing matches.' : 'No questions or ideas yet.'}</p>}
+          {list.length === 0 && <p className="muted small">{submissions.length ? 'Nothing matches.' : 'No questions yet.'}</p>}
           {list.map((s) => (
             <button key={s.id} className="attach-item" onClick={() => attach(s)}>
-              <span className={`kind-badge ${s.kind}`}>{s.kind === 'question' ? 'Question' : 'Idea'}</span>
+              {s.prototype && <span className="kind-badge proto">Prototype</span>}
               <span className="attach-text">{s.text}</span>
               <span className="muted small">{s.author}</span>
             </button>

@@ -89,7 +89,11 @@ export default function FieldBoard() {
   }
   const historyRef = useRef<Board[]>([])
   const svgRef = useRef<SVGSVGElement>(null)
-  const gesture = useRef<{ kind: 'robot'; id: string; dx: number; dy: number } | { kind: 'draw' } | { kind: 'erase' } | null>(null)
+  const gesture = useRef<
+    { kind: 'robot'; id: string; dx: number; dy: number } | { kind: 'rotate'; id: string } | { kind: 'draw' } | { kind: 'erase' } | null
+  >(null)
+  // The robot picked with the Move tool, which shows a handle for turning it.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const board = draft ?? stored
   const aspect = field ? field.height / field.width : 0.5
@@ -143,7 +147,10 @@ export default function FieldBoard() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !(e.target instanceof HTMLInputElement)) {
         e.preventDefault()
         undo()
-      }
+      } else if ((e.key === '[' || e.key === ']') && selected && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault()
+        turn(selected.id, e.key === ']' ? 45 : -45)
+      } else if (e.key === 'Escape') setSelectedId(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -158,11 +165,30 @@ export default function FieldBoard() {
   const norm = ([x, y]: [number, number]): [number, number] => [x / VW, y / VH]
   const px = ([x, y]: [number, number]): [number, number] => [x * VW, y * VH]
 
+  /** Turns a point by `deg` degrees around the origin. */
+  const turnPoint = ([x, y]: [number, number], deg: number): [number, number] => {
+    const a = (deg * Math.PI) / 180
+    return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]
+  }
+
   const robotAt = (p: [number, number], robots = board.robots) =>
     [...robots].reverse().find((r) => {
       const [cx, cy] = px([r.x, r.y])
-      return Math.abs(p[0] - cx) <= robotPx / 2 && Math.abs(p[1] - cy) <= robotPx / 2
+      // Test in the robot's own (turned) frame.
+      const [lx, ly] = turnPoint([p[0] - cx, p[1] - cy], -(r.angle ?? 0))
+      return Math.abs(lx) <= robotPx / 2 && Math.abs(ly) <= robotPx / 2
     })
+
+  const selected = tool === 'move' ? board.robots.find((r) => r.id === selectedId) : undefined
+  /** Distance from a robot's center to its turning handle. */
+  const handleReach = robotPx / 2 + Math.max(14, robotPx * 0.45)
+  const handleAt = (r: BoardRobot): [number, number] => {
+    const [cx, cy] = px([r.x, r.y])
+    const [hx, hy] = turnPoint([0, -handleReach], r.angle ?? 0)
+    return [cx + hx, cy + hy]
+  }
+  const turn = (id: string, by: number) =>
+    commit({ ...stored, robots: stored.robots.map((r) => (r.id === id ? { ...r, angle: (((r.angle ?? 0) + by) % 360 + 360) % 360 } : r)) })
 
   /** Removes whatever is under the pointer (robots first, then the top-most line). */
   const eraseAt = (p: [number, number], b: Board): Board => {
@@ -187,7 +213,17 @@ export default function FieldBoard() {
     }
     const p = toSvg(e)
     if (tool === 'move') {
+      if (selected) {
+        const [hx, hy] = handleAt(selected)
+        if (Math.hypot(p[0] - hx, p[1] - hy) < Math.max(14, robotPx * 0.3)) {
+          gesture.current = { kind: 'rotate', id: selected.id }
+          historyRef.current = [...historyRef.current.slice(-UNDO_LIMIT + 1), stored]
+          setDraft(stored)
+          return
+        }
+      }
       const robot = robotAt(p)
+      setSelectedId(robot?.id ?? null)
       if (!robot) return
       const [cx, cy] = px([robot.x, robot.y])
       gesture.current = { kind: 'robot', id: robot.id, dx: p[0] - cx, dy: p[1] - cy }
@@ -207,7 +243,18 @@ export default function FieldBoard() {
     const g = gesture.current
     if (!g) return
     const p = toSvg(e)
-    if (g.kind === 'robot') {
+    if (g.kind === 'rotate') {
+      const current = draftRef.current ?? stored
+      const robot = current.robots.find((r) => r.id === g.id)
+      if (!robot) return
+      const [cx, cy] = px([robot.x, robot.y])
+      let angle = (Math.atan2(p[1] - cy, p[0] - cx) * 180) / Math.PI + 90
+      // Snap to the nearest 45° when close, so square-on angles are easy to hit.
+      const near = Math.round(angle / 45) * 45
+      if (Math.abs(angle - near) < 6) angle = near
+      angle = ((angle % 360) + 360) % 360
+      setDraft({ ...current, robots: current.robots.map((r) => (r.id === g.id ? { ...r, angle } : r)) })
+    } else if (g.kind === 'robot') {
       const current = draftRef.current ?? stored
       const next = { ...current, robots: current.robots.map((r) => (r.id === g.id ? { ...r, ...xy(norm([p[0] - g.dx, p[1] - g.dy])) } : r)) }
       setDraft(next)
@@ -309,6 +356,9 @@ export default function FieldBoard() {
     // The drawings and robots, without the field image (an SVG drawn as an image can't load it).
     const clone = svg.cloneNode(true) as SVGSVGElement
     clone.querySelector('image')?.remove()
+    // Leave out the selection (turning handle and yellow outline).
+    for (const el of clone.querySelectorAll('.fb-turn')) el.remove()
+    for (const el of clone.querySelectorAll('.fb-robot.selected rect[stroke]')) el.setAttribute('stroke', '#fff')
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     clone.setAttribute('width', String(canvas.width))
     clone.setAttribute('height', String(canvas.height))
@@ -511,18 +561,37 @@ export default function FieldBoard() {
             ))}
             {board.robots.map((r) => {
               const [cx, cy] = px([r.x, r.y])
+              const isSelected = r.id === selected?.id
               return (
-                <g key={r.id} className="fb-robot" transform={`translate(${cx} ${cy})`}>
-                  <rect
-                    x={-robotPx / 2}
-                    y={-robotPx / 2}
-                    width={robotPx}
-                    height={robotPx}
-                    rx={robotPx * 0.18}
-                    fill={ALLIANCE_FILL[r.alliance]}
-                    stroke="#fff"
-                    strokeWidth={Math.max(1.5, robotPx * 0.06)}
-                  />
+                <g key={r.id} className={`fb-robot${isSelected ? ' selected' : ''}`} transform={`translate(${cx} ${cy})`}>
+                  <g transform={`rotate(${r.angle ?? 0})`}>
+                    {isSelected && (
+                      <g className="fb-turn">
+                        <line x1={0} y1={-robotPx / 2} x2={0} y2={-handleReach} />
+                        <circle cx={0} cy={-handleReach} r={Math.max(7, robotPx * 0.16)} />
+                      </g>
+                    )}
+                    <rect
+                      x={-robotPx / 2}
+                      y={-robotPx / 2}
+                      width={robotPx}
+                      height={robotPx}
+                      rx={robotPx * 0.18}
+                      fill={ALLIANCE_FILL[r.alliance]}
+                      stroke={isSelected ? '#f5c400' : '#fff'}
+                      strokeWidth={Math.max(1.5, robotPx * 0.06)}
+                    />
+                    {/* The front of the robot. */}
+                    <rect
+                      x={-robotPx * 0.32}
+                      y={-robotPx / 2 + robotPx * 0.08}
+                      width={robotPx * 0.64}
+                      height={Math.max(2, robotPx * 0.1)}
+                      rx={robotPx * 0.05}
+                      fill="#fff"
+                      opacity={0.9}
+                    />
+                  </g>
                   <text textAnchor="middle" dominantBaseline="central" fontSize={Math.max(9, robotPx * (r.label.length > 3 ? 0.3 : 0.4))}>
                     {r.label}
                   </text>
@@ -534,7 +603,10 @@ export default function FieldBoard() {
       </div>
       {field && (
         <p className="muted small fb-hint">
-          {tool === 'move' && 'Drag robots to move them. Double-click a robot to rename it (e.g. a team number).'}
+          {tool === 'move' &&
+            (selected
+              ? 'Drag the yellow handle to turn the robot (it snaps to 45°), or press [ and ]. The white bar is the front.'
+              : 'Drag robots to move them. Click one to turn it. Double-click a robot to rename it (e.g. a team number).')}
           {tool === 'pen' && 'Draw paths freehand.'}
           {tool === 'line' && 'Drag to draw a straight line.'}
           {tool === 'erase' && 'Click or drag over lines and robots to erase them.'}

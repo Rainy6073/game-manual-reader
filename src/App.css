@@ -355,14 +355,6 @@ button.ghost:hover:not(:disabled) {
   padding: 2px 8px;
   border-radius: 999px;
 }
-.kind-badge.question {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-.kind-badge.idea {
-  background: var(--idea-soft);
-  color: var(--idea);
-}
 .kind-badge.proto {
   background: var(--text);
   color: #fff;
@@ -695,9 +687,6 @@ body.resizing .manual-panel {
 .board-columns.wide .board-column {
   flex: 1 1 0;
   min-width: 300px;
-}
-.board-column.group-type.key-idea {
-  border-top-color: var(--idea);
 }
 .board-column > header {
   display: flex;
@@ -1118,7 +1107,7 @@ body.resizing .manual-panel {
 }
 .ability-row {
   display: grid;
-  grid-template-columns: 1fr auto auto 32px;
+  grid-template-columns: 18px 1fr auto auto 32px;
   align-items: center;
   gap: 8px;
   padding: 6px 6px 6px 8px;
@@ -1128,6 +1117,9 @@ body.resizing .manual-panel {
 }
 :root[data-role='standard'] .ability-row {
   grid-template-columns: 1fr 56px 56px;
+}
+.ability-row.lifted {
+  grid-template-columns: none;
 }
 .ability-row.head {
   background: none;
@@ -1148,6 +1140,149 @@ body.resizing .manual-panel {
 :root[data-role='presenter'] .ability-row.head span:nth-child(2),
 :root[data-role='presenter'] .ability-row.head span:nth-child(3) {
   width: 92px;
+}
+.ability-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 8px;
+}
+.ability-item.ghost {
+  opacity: 0.35;
+}
+.ability-item.insert,
+.ability-end.insert {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+.ability-end {
+  min-height: 20px;
+}
+.ability-row.lifted {
+  display: block;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgb(60 0 0 / 0.2);
+  border-color: var(--accent);
+  cursor: grabbing;
+}
+.row-grip {
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  text-align: center;
+}
+.ability-row.pickable {
+  cursor: pointer;
+}
+.ability-row.pickable:hover {
+  border-color: var(--accent);
+}
+.ev-tools {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ev-tools .add-row {
+  flex: 1;
+  min-width: 220px;
+}
+.proposal-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-left: 5px solid var(--accent);
+  border-radius: 10px;
+}
+.proposal-queue h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+.proposal-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.proposal-item.open {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.proposal-summary {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 8px 10px;
+}
+.proposal-change {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+.proposal-change b {
+  color: var(--accent-strong);
+}
+.proposal-review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 10px 10px;
+}
+.proposal-review.mine {
+  padding: 10px;
+  margin: 0 6px 4px;
+  background: var(--bg);
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+}
+.proposal-review p {
+  margin: 0;
+}
+.proposal-inputs {
+  display: flex;
+  gap: 16px;
+}
+.proposal-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chart .proposal-dot {
+  fill: rgb(255 255 255 / 0.85);
+  stroke: var(--accent-strong);
+  stroke-width: 2.5;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+.chart .proposal-line {
+  stroke: var(--accent-strong);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.chart .proposal-arrowhead {
+  fill: var(--accent-strong);
+}
+.chart .proposal .grab {
+  fill: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.chart .proposal.lifting .proposal-dot {
+  opacity: 0.35;
+}
+.chart.proposing .plot-bg {
+  cursor: crosshair;
+}
+.chart.pickable .marker circle,
+.chart.pickable .label {
+  cursor: pointer;
 }
 .ability-row.hot {
   border-color: var(--accent);
@@ -1237,22 +1372,14 @@ span.ability-name {
   position: absolute;
   inset: 0;
 }
-.chart .quad {
-  fill: transparent;
+.chart .plot-bg {
+  fill: #fff;
 }
-.chart .quad.win {
-  fill: #ecf8f1;
-}
-.chart .quad.avoid {
-  fill: #fdf1f1;
-}
-.chart .quad-label {
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  fill: #b3aaaa;
+.chart .grid,
+.chart .frame,
+.chart .tick,
+.chart .axis-title {
+  pointer-events: none;
 }
 .chart .grid {
   stroke: #eee6e6;
@@ -2095,6 +2222,16 @@ span.ability-name {
   font-family: var(--font-body);
   font-weight: 700;
   pointer-events: none;
+}
+.fb-turn line {
+  stroke: #f5c400;
+  stroke-width: 2.5;
+}
+.fb-turn circle {
+  fill: #f5c400;
+  stroke: #111;
+  stroke-width: 1.5;
+  cursor: grab;
 }
 .fb-robot rect {
   filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.35));

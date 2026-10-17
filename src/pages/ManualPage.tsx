@@ -10,12 +10,12 @@ import ManualReader, { type ManualRef, type ManualSource } from '../reader/Manua
 import { isPasswordError, loadPdf } from '../reader/pdf'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useDoc, useFileUrl } from '../sync/store'
-import { newId, type SubmissionKind } from '../types'
+import { newId } from '../types'
 import ConfirmButton from '../components/ConfirmButton'
 
 const SAMPLE = { url: '/manuals/2026GameManual.pdf', name: '2026 FRC Game Manual (REBUILT)' }
 
-type Filter = 'all' | SubmissionKind | 'mine' | 'notes'
+type Filter = 'all' | 'mine' | 'notes'
 
 const MIN_SIDE = 260
 /** Dragging the panel narrower than this collapses it. */
@@ -175,19 +175,16 @@ export default function ManualPage() {
   const [dragging, setDragging] = useState<string | null>(null)
   const sensors = useCardSensors()
   const dragged = dragging ? submissions.find((s) => s.id === dragging) : undefined
-  const shown = filter === 'notes' ? [] : sorted.filter((s) => (filter === 'all' ? true : filter === 'mine' ? s.author === name : s.kind === filter))
+  const shown = filter === 'notes' ? [] : sorted.filter((s) => filter === 'all' || s.author === name)
   const counts = {
     all: sorted.length,
-    question: sorted.filter((s) => s.kind === 'question').length,
-    idea: sorted.filter((s) => s.kind === 'idea').length,
     mine: sorted.filter((s) => s.author === name).length,
     notes: myNotes.length,
   }
   const filters: { id: Filter; label: string }[] = presenter
     ? [
         { id: 'all', label: 'All' },
-        { id: 'question', label: 'Questions' },
-        { id: 'idea', label: 'Ideas' },
+        { id: 'mine', label: 'Mine' },
         { id: 'notes', label: 'My notes' },
       ]
     : [
@@ -299,7 +296,7 @@ export default function ManualPage() {
               {filter === 'notes' && <NotesList notes={myNotes} onJump={jumpTo} onEdit={(note, at) => setNoteDraft({ note, at })} />}
               {filter !== 'notes' && shown.length === 0 && (
                 <p className="empty muted">
-                  {filter === 'mine' ? 'Nothing sent yet. Your questions and ideas will show up here.' : 'No submissions yet.'}
+                  {filter === 'mine' ? 'Nothing sent yet. Your questions will show up here.' : 'No submissions yet.'}
                 </p>
               )}
               {shown.map((s) => (
@@ -378,7 +375,7 @@ export default function ManualPage() {
               ) : (
                 <>
                   <h3>Waiting for the manual</h3>
-                  <p className="muted">It will appear here as soon as the presenter uploads it. You can already send questions and ideas.</p>
+                  <p className="muted">It will appear here as soon as the presenter uploads it. You can already send questions.</p>
                 </>
               )}
             </div>
