@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import type { ManualRef } from '../reader/ManualReader'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
-import { newId, type BoardGroup, type Submission } from '../types'
+import { newId, PROTOTYPE_GROUP, type BoardGroup, type Submission } from '../types'
 import Composer from './Composer'
 import { useLiveSort } from '../liveSort'
 import { byRank, cardsFirst, placeSubmission, useCardSensors } from '../reorder'
@@ -30,10 +30,13 @@ const GROUPINGS: { id: GroupBy; label: string }[] = [
 ]
 
 const UNGROUPED = 'ungrouped'
+/** Groups that always exist and can't be renamed or deleted. */
+const isBuiltIn = (key: string) => key === UNGROUPED || key === PROTOTYPE_GROUP
 
 /** The group a submission falls in, and that group's title. */
 function groupOf(s: Submission, by: GroupBy, custom: Map<string, BoardGroup>): [key: string, title: string] {
   if (by === 'custom') {
+    if (s.groupId === PROTOTYPE_GROUP) return [PROTOTYPE_GROUP, 'Prototype']
     const g = s.groupId ? custom.get(s.groupId) : undefined
     return g ? [g.id, g.name] : [UNGROUPED, 'Not grouped']
   }
@@ -53,10 +56,12 @@ function groupSubmissions(list: Submission[], by: GroupBy, custom: Map<string, B
   }
   const result = [...groups.values()]
   if (by === 'custom') {
-    // Every group shows, even empty ones: "Not grouped" first, then oldest to newest.
+    // Every group shows, even empty ones: "Not grouped", then "Prototype", then
+    // the groups people made, oldest to newest.
     const ordered = [...custom.values()].sort((a, b) => a.createdAt - b.createdAt)
     return [
       groups.get(UNGROUPED) ?? { key: UNGROUPED, title: 'Not grouped', items: [] },
+      groups.get(PROTOTYPE_GROUP) ?? { key: PROTOTYPE_GROUP, title: 'Prototype', items: [] },
       ...ordered.map((g) => groups.get(g.id) ?? { key: g.id, title: g.name, items: [] }),
     ]
   }
@@ -192,7 +197,7 @@ export default function QuestionBoard({ submissions, reference, onClearReference
         {groups.map((g) => (
           <DropList key={g.key} group={g.key} enabled={canReorder} className={`board-column group-${groupBy} key-${g.key}`}>
             <header>
-              {groupBy === 'custom' && g.key !== UNGROUPED ? (
+              {groupBy === 'custom' && !isBuiltIn(g.key) ? (
                 <input
                   className="group-name"
                   defaultValue={g.title}
@@ -209,7 +214,12 @@ export default function QuestionBoard({ submissions, reference, onClearReference
                 <h3>{g.title}</h3>
               )}
               <span className="count-pill">{live.items(g.key).length}</span>
-              {groupBy === 'custom' && g.key !== UNGROUPED && (
+              {groupBy === 'custom' && g.key === PROTOTYPE_GROUP && (
+                <a className="group-link small" href="#/prototypes" title="These questions are on the Prototypes tab">
+                  Prototypes tab →
+                </a>
+              )}
+              {groupBy === 'custom' && !isBuiltIn(g.key) && (
                 <ConfirmButton
                   className="icon ghost"
                   onConfirm={() => deleteGroup(g)}

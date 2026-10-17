@@ -2920,3 +2920,18 @@ button.icon.armed {
     transition: none !important;
   }
 }
+
+/* The built-in Prototype group on the Question Board. */
+.board-column.group-custom.key-prototype {
+  border-top-color: var(--text);
+}
+.group-link {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.group-link:hover {
+  text-decoration: underline;
+}

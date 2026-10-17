@@ -8,7 +8,8 @@ import ToolsPage from './pages/ToolsPage'
 import Welcome from './pages/Welcome'
 import UpdatePrompt from './components/UpdatePrompt'
 import { SessionContext, useLocalState, useStoredSession } from './session'
-import { syncMode, useSyncStatus } from './sync/store'
+import { patch, syncMode, useCollection, useSyncStatus } from './sync/store'
+import { PROTOTYPE_GROUP } from './types'
 import './App.css'
 
 const PAGES = [
@@ -46,6 +47,15 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.role = session?.role ?? ''
   }, [session?.role])
+
+  // Prototypes made before the Question Board's Prototype group existed are moved
+  // into it once, so they stay on the Prototypes tab. Later moves are left alone.
+  const submissions = useCollection('submissions')
+  useEffect(() => {
+    for (const s of submissions) {
+      if (s.prototype && !s.prototype.grouped) patch('submissions', s.id, { groupId: PROTOTYPE_GROUP, prototype: { ...s.prototype, grouped: true } })
+    }
+  }, [submissions])
 
   if (!session)
     return (

@@ -9,7 +9,7 @@ import SubmissionCard from '../components/SubmissionCard'
 import { clockTime, navigate } from '../nav'
 import { useIsPresenter, useSession } from '../session'
 import { patch, put, remove, uploadFile, useCollection, useFileUrl } from '../sync/store'
-import { newId, type PrototypeStatus, type Submission } from '../types'
+import { newId, PROTOTYPE_GROUP, type PrototypeStatus, type Submission } from '../types'
 import ConfirmButton from '../components/ConfirmButton'
 
 const STATUS: { id: PrototypeStatus; label: string }[] = [
@@ -32,11 +32,11 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   const [filter, setFilter] = useState<Filter>('all')
   const sensors = useCardSensors()
 
-  const prototypes = useMemo(
-    () => submissions.filter((s) => s.prototype).sort(byRank),
-    [submissions],
-  )
-  const inbox = useMemo(() => submissions.filter((s) => !s.prototype).sort((a, b) => b.createdAt - a.createdAt), [submissions])
+  // Only questions in the Question Board's "Prototype" group show here: those not
+  // started yet on the left, the rest in the status columns.
+  const inGroup = useMemo(() => submissions.filter((s) => s.groupId === PROTOTYPE_GROUP), [submissions])
+  const prototypes = useMemo(() => inGroup.filter((s) => s.prototype).sort(byRank), [inGroup])
+  const inbox = useMemo(() => inGroup.filter((s) => !s.prototype).sort(byRank), [inGroup])
   const responseCount = useMemo(() => {
     const m = new Map<string, number>()
     for (const r of responses) m.set(r.submissionId, (m.get(r.submissionId) ?? 0) + 1)
@@ -46,7 +46,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
   const shown = prototypes.filter((p) => filter === 'all' || isAssigned(p, name))
   const byId = new Map(submissions.map((s) => [s.id, s]))
   const promote = (s: Submission, status: PrototypeStatus = 'todo') =>
-    patch('submissions', s.id, { prototype: { assignees: [], status, createdAt: Date.now() } })
+    patch('submissions', s.id, { prototype: { assignees: [], status, createdAt: Date.now(), grouped: true } })
   const canMove = (s: Submission) => presenter || (!!s.prototype && isAssigned(s, name))
 
   // Cards slide between and within the status columns while dragged; questions from
@@ -61,7 +61,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
       const s = byId.get(id)
       if (!s || to === 'inbox') return
       const status = to as PrototypeStatus
-      const prototype = s.prototype ? { ...s.prototype, status } : { assignees: [], status, createdAt: Date.now() }
+      const prototype = s.prototype ? { ...s.prototype, status } : { assignees: [], status, createdAt: Date.now(), grouped: true }
       placeSubmission(prototypes, id, shown.filter((p) => p.prototype!.status === status), before, { prototype })
     },
   })
@@ -76,12 +76,16 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
         {presenter && (
           <aside className="inbox">
             <header className="section-head">
-              <h2>Questions</h2>
+              <h2>Prototype group</h2>
               <span className="muted">{inbox.length}</span>
             </header>
-            <p className="muted small">Turn questions into prototype tasks (or drag them into a column), then assign people to them.</p>
+            <p className="muted small">Questions put in the Prototype group on the Question Board. Make them prototype tasks (or drag them into a column), then assign people.</p>
             <div className="feed">
-              {inbox.length === 0 && <p className="empty muted">Everything submitted is already a prototype.</p>}
+              {inbox.length === 0 && <p className="empty muted">
+                  {inGroup.length
+                    ? 'Everything in the Prototype group is already a prototype.'
+                    : 'Nothing here yet. Drag questions into the Prototype group on the Question Board.'}
+                </p>}
               {/* The inbox keeps its own order: nothing shifts in it while dragging. */}
               <SortableContext items={live.items('inbox')} strategy={() => null}>
               {live.items('inbox').map((id) => byId.get(id)!).map((s) => (
@@ -126,7 +130,7 @@ export default function PrototypesPage({ openId }: { openId?: string }) {
           {prototypes.length === 0 && (
             <p className="empty muted">
               {presenter
-                ? 'Pick questions from the left to make them official prototypes.'
+                ? 'Drag questions into the Prototype group on the Question Board, then make them prototypes from the left.'
                 : 'No prototypes yet. The presenter will create them from the team’s questions.'}
             </p>
           )}

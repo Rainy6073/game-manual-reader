@@ -27,6 +27,8 @@ export interface Submission {
     assignees: string[]
     status: PrototypeStatus
     createdAt: number
+    /** Set once it has been put in the Prototype group (prototypes from before the group existed are moved once). */
+    grouped?: boolean
   }
 }
 
@@ -93,6 +95,12 @@ export interface ManualNoteDoc {
   text: string
   createdAt: number
 }
+
+/**
+ * The built-in Question Board group whose questions show on the Prototypes tab.
+ * It always exists and is stored as a submission's `groupId`, like other groups.
+ */
+export const PROTOTYPE_GROUP = 'prototype'
 
 /** A group people made on the Question Board to collect similar questions and ideas. */
 export interface BoardGroup {
