@@ -14,6 +14,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useMemo, useState } from 'react'
 import { DropList, Sortable } from '../components/Sortable'
 import { useLiveSort } from '../liveSort'
+import { formatRatio, ratioTone, valuePerEffort } from '../ratio'
 import { cardsFirst, useCardSensors } from '../reorder'
 import { useIsPresenter, useLocalState } from '../session'
 import { put, remove, useCollection } from '../sync/store'
@@ -270,6 +271,9 @@ function CardFace({ ability, lifted, onRemove }: { ability: Ability; lifted?: bo
       <span className="ev-badges">
         <span title="Effort">E {ability.effort ?? '–'}</span>
         <span title="Value">V {ability.value ?? '–'}</span>
+        <span title="Value ÷ effort" className={`ratio-badge ${ratioTone(valuePerEffort(ability.effort, ability.value))}`}>
+          {formatRatio(valuePerEffort(ability.effort, ability.value))}
+        </span>
       </span>
       {onRemove && (
         <button
@@ -350,6 +354,9 @@ function Column({ archetype, byId, abilities, board, cards }: ColumnProps) {
         </span>
         <span>
           Value <strong>{total('value')}</strong>
+        </span>
+        <span className={`ratio-total ${ratioTone(valuePerEffort(total('effort'), total('value')))}`} title="Total value ÷ total effort">
+          V/E <strong>{formatRatio(valuePerEffort(total('effort'), total('value')))}</strong>
         </span>
       </div>
       <div className="column-cards">

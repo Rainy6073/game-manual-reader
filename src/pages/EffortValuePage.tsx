@@ -7,6 +7,7 @@ import FibInput from '../components/FibInput'
 import ScatterChart from '../components/ScatterChart'
 import { FIB } from '../fib'
 import { useLiveSort } from '../liveSort'
+import { formatRatio, ratioTone, valuePerEffort } from '../ratio'
 import { cardsFirst, useCardSensors } from '../reorder'
 import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
@@ -16,17 +17,8 @@ import { newId, type Ability, type Proposal } from '../types'
 const QUEUE_MAX = 3
 
 const rankOf = (a: Ability) => a.order ?? a.createdAt
-/** Value per unit of effort, e.g. "2.6" (higher is a better deal); "–" until both are rated. */
-function ratio(a: Ability) {
-  if (a.effort == null || a.value == null || a.effort === 0) return '–'
-  const r = a.value / a.effort
-  return r >= 10 ? String(Math.round(r)) : r.toFixed(1).replace(/\.0$/, '')
-}
-const ratioClass = (a: Ability) => {
-  if (a.effort == null || a.value == null) return 'ratio'
-  const r = a.value / a.effort
-  return `ratio${r >= 2 ? ' good' : r < 0.75 ? ' poor' : ''}`
-}
+const ratio = (a: Ability) => formatRatio(valuePerEffort(a.effort, a.value))
+const ratioClass = (a: Ability) => `ratio ${ratioTone(valuePerEffort(a.effort, a.value))}`
 
 const rating = (e: number | null, v: number | null) => (e == null || v == null ? 'not rated' : `E${e} · V${v}`)
 

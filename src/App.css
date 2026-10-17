@@ -1702,7 +1702,8 @@ span.ability-name {
 }
 .column-totals {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   padding: 0 6px;
 }
 .column-totals strong {
@@ -3011,4 +3012,18 @@ button.icon.armed {
   box-shadow: 0 14px 40px rgb(60 0 0 / 0.22);
   cursor: grabbing;
   min-height: 120px;
+}
+
+/* Value ÷ effort on archetypes: the column total and each card's badge. */
+.ratio-total.good strong,
+.ev-badges .ratio-badge.good {
+  color: var(--ok);
+}
+.ratio-total.poor strong,
+.ev-badges .ratio-badge.poor {
+  color: var(--accent);
+}
+.ev-badges .ratio-badge {
+  background: none;
+  border: 1px solid var(--border);
 }
