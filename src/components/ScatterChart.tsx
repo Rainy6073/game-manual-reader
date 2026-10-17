@@ -367,7 +367,6 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups, compact, fontSize, plotW, plotH, domain, view.x0, view.y0, view.span])
 
-  const half = domain / 2
 
   return (
     <>
@@ -381,14 +380,21 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
           {/* Low effort & high value (top left) shades green, high effort & low value
               (bottom right) red, each fading to white toward the middle. */}
           <defs>
-            <linearGradient id="ev-good" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#18a058" stopOpacity="0.32" />
-              <stop offset="1" stopColor="#18a058" stopOpacity="0" />
-            </linearGradient>
-            <linearGradient id="ev-bad" x1="1" y1="1" x2="0" y2="0">
-              <stop offset="0" stopColor="#d0101b" stopOpacity="0.26" />
-              <stop offset="1" stopColor="#d0101b" stopOpacity="0" />
-            </linearGradient>
+            {/* Glows from three corners that fade out across the whole chart:
+                green (quick wins), yellow (big bets) and red (money pits). */}
+            {(
+              [
+                ['ev-good', '#18a058', 0, 0, 0.55],
+                ['ev-bet', '#f2b705', 1, 0, 0.5],
+                ['ev-bad', '#d0101b', 1, 1, 0.45],
+              ] as const
+            ).map(([id, color, cx, cy, strength]) => (
+              <radialGradient key={id} id={id} cx={cx} cy={cy} r="1" fx={cx} fy={cy}>
+                <stop offset="0" stopColor={color} stopOpacity={strength} />
+                <stop offset="0.45" stopColor={color} stopOpacity={strength * 0.4} />
+                <stop offset="0.85" stopColor={color} stopOpacity="0" />
+              </radialGradient>
+            ))}
             <clipPath id="ev-plot">
               <rect x={LEFT} y={TOP} width={plotW} height={plotH} />
             </clipPath>
@@ -409,9 +415,10 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
             }}
           />
           <g clipPath="url(#ev-plot)">
-            {/* The shaded corners are placed in rating units, so they move with the zoom. */}
-            <rect x={x(0)} y={y(domain)} width={x(half) - x(0)} height={y(half) - y(domain)} fill="url(#ev-good)" pointerEvents="none" />
-            <rect x={x(half)} y={y(half)} width={x(domain) - x(half)} height={y(0) - y(half)} fill="url(#ev-bad)" pointerEvents="none" />
+            {/* The shading is placed in rating units, so it moves with the zoom. */}
+            {['ev-good', 'ev-bet', 'ev-bad'].map((id) => (
+              <rect key={id} x={x(0)} y={y(domain)} width={x(domain) - x(0)} height={y(0) - y(domain)} fill={`url(#${id})`} pointerEvents="none" />
+            ))}
             {xTicks.map((t) => (
               <line key={`x${t}`} className="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + plotH} />
             ))}

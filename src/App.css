@@ -547,7 +547,8 @@ body.resizing {
   cursor: col-resize;
   user-select: none;
 }
-body.resizing .manual-panel {
+body.resizing .manual-panel,
+body.resizing .ev-chart {
   pointer-events: none;
 }
 
@@ -1082,7 +1083,8 @@ body.resizing .manual-panel {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 470px) 1fr;
+  /* List | divider | chart. The list keeps room for the chart on smaller windows. */
+  grid-template-columns: max(300px, min(var(--ev-list-w, 440px), calc(100% - 340px))) 7px 1fr;
 }
 .ev-list {
   display: flex;
@@ -1091,7 +1093,6 @@ body.resizing .manual-panel {
   padding: 16px;
   min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--border);
   background: var(--surface);
 }
 .ev-list > p {
@@ -1112,7 +1113,7 @@ body.resizing .manual-panel {
 }
 .ability-row {
   display: grid;
-  grid-template-columns: 18px 1fr auto auto 32px;
+  grid-template-columns: 18px minmax(0, 1fr) 92px 92px 40px 32px;
   align-items: center;
   gap: 8px;
   padding: 6px 6px 6px 8px;
@@ -1121,8 +1122,23 @@ body.resizing .manual-panel {
   border-radius: 8px;
 }
 :root[data-role='standard'] .ability-row {
-  grid-template-columns: 1fr 56px 56px;
+  grid-template-columns: 1fr 56px 56px 48px;
 }
+/* Value ÷ effort beside each ability: green when it's a good deal, red when poor. */
+.ability-row .ratio {
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.ability-row .ratio.good {
+  color: var(--ok);
+}
+.ability-row .ratio.poor {
+  color: var(--accent);
+}
+
 .ability-row.lifted {
   grid-template-columns: none;
 }
@@ -1137,14 +1153,8 @@ body.resizing .manual-panel {
   padding-top: 0;
   padding-bottom: 0;
 }
-.ability-row.head span:nth-child(2),
-.ability-row.head span:nth-child(3) {
+.ability-row.head .h-num {
   text-align: center;
-  min-width: 56px;
-}
-:root[data-role='presenter'] .ability-row.head span:nth-child(2),
-:root[data-role='presenter'] .ability-row.head span:nth-child(3) {
-  width: 92px;
 }
 .ability-item {
   display: flex;
@@ -2730,6 +2740,9 @@ button.danger-fill {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+  }
+  .ev-resize {
+    display: none;
   }
   .ev-list,
   .ev-chart {

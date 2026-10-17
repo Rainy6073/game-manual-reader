@@ -1,14 +1,14 @@
 import { DndContext, DragOverlay } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import ConfirmButton from '../components/ConfirmButton'
 import FibInput from '../components/FibInput'
 import ScatterChart from '../components/ScatterChart'
 import { FIB } from '../fib'
 import { useLiveSort } from '../liveSort'
 import { cardsFirst, useCardSensors } from '../reorder'
-import { useIsPresenter, useSession } from '../session'
+import { useIsPresenter, useLocalState, useSession } from '../session'
 import { patch, put, remove, useCollection } from '../sync/store'
 import { newId, type Ability, type Proposal } from '../types'
 
@@ -16,6 +16,18 @@ import { newId, type Ability, type Proposal } from '../types'
 const QUEUE_MAX = 3
 
 const rankOf = (a: Ability) => a.order ?? a.createdAt
+/** Value per unit of effort, e.g. "2.6" (higher is a better deal); "–" until both are rated. */
+function ratio(a: Ability) {
+  if (a.effort == null || a.value == null || a.effort === 0) return '–'
+  const r = a.value / a.effort
+  return r >= 10 ? String(Math.round(r)) : r.toFixed(1).replace(/\.0$/, '')
+}
+const ratioClass = (a: Ability) => {
+  if (a.effort == null || a.value == null) return 'ratio'
+  const r = a.value / a.effort
+  return `ratio${r >= 2 ? ' good' : r < 0.75 ? ' poor' : ''}`
+}
+
 const rating = (e: number | null, v: number | null) => (e == null || v == null ? 'not rated' : `E${e} · V${v}`)
 
 type SortKey = 'name' | 'value' | 'effort' | 'ratio'
@@ -32,6 +44,27 @@ export default function EffortValuePage() {
   const abilities = useCollection('abilities')
   const proposals = useCollection('proposals')
   const [name, setName] = useState('')
+  // The list's width, set by dragging the divider beside the chart (per device).
+  const [listWidth, setListWidth] = useLocalState('kickoff.evListWidth', 440)
+  const pageRef = useRef<HTMLDivElement>(null)
+  const clampWidth = (w: number) => Math.round(Math.max(300, Math.min(w, (pageRef.current?.clientWidth ?? 1200) - 340)))
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const handle = e.currentTarget
+    handle.setPointerCapture(e.pointerId)
+    const left = pageRef.current!.getBoundingClientRect().left
+    document.body.classList.add('resizing')
+    const move = (ev: PointerEvent) => setListWidth(clampWidth(ev.clientX - left))
+    const up = () => {
+      document.body.classList.remove('resizing')
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', up)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', up)
+  }
   const [highlight, setHighlight] = useState<string | null>(null)
   const sorted = useMemo(() => [...abilities].sort((a, b) => rankOf(a) - rankOf(b)), [abilities])
   const byId = useMemo(() => new Map(abilities.map((a) => [a.id, a])), [abilities])
@@ -112,7 +145,7 @@ export default function EffortValuePage() {
   const myPending = (abilityId: string) => queue.find((p) => p.abilityId === abilityId && p.author === me)
 
   return (
-    <div className="ev-page">
+    <div className="ev-page" ref={pageRef} style={{ '--ev-list-w': `${listWidth}px` } as React.CSSProperties}>
       <section className="ev-list">
         <header className="section-head">
           <h2>Robot abilities</h2>
@@ -203,8 +236,15 @@ export default function EffortValuePage() {
             <div className="ability-row head" role="row">
               {presenter && <span />}
               <span role="columnheader">Ability</span>
-              <span role="columnheader">Effort</span>
-              <span role="columnheader">Value</span>
+              <span role="columnheader" className="h-num">
+                Effort
+              </span>
+              <span role="columnheader" className="h-num">
+                Value
+              </span>
+              <span role="columnheader" className="h-num" title="Value ÷ effort: how much value each unit of effort buys">
+                V/E
+              </span>
               {presenter && <span />}
             </div>
             {sorted.length === 0 && (
@@ -255,6 +295,22 @@ export default function EffortValuePage() {
           </DragOverlay>
         </DndContext>
       </section>
+
+      <div
+        className="side-resize ev-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the abilities list"
+        aria-valuenow={listWidth}
+        tabIndex={0}
+        title="Drag to resize · double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={() => setListWidth(440)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setListWidth((w) => clampWidth(w - 24))
+          else if (e.key === 'ArrowRight') setListWidth((w) => clampWidth(w + 24))
+        }}
+      />
 
       <section className="ev-chart">
         <ScatterChart
@@ -320,6 +376,9 @@ function AbilityRow({
             />
             <FibInput label="Effort" value={a.effort} onChange={(effort) => patch('abilities', a.id, { effort })} />
             <FibInput label="Value" value={a.value} onChange={(value) => patch('abilities', a.id, { value })} />
+            <span className={ratioClass(a)} title="Value ÷ effort">
+              {ratio(a)}
+            </span>
             <ConfirmButton
               className="icon ghost"
               aria-label={`Delete ${a.name}`}
@@ -340,6 +399,9 @@ function AbilityRow({
             </span>
             <span className="score" role="cell">
               {a.value ?? '–'}
+            </span>
+            <span className={ratioClass(a)} role="cell" title="Value ÷ effort">
+              {ratio(a)}
             </span>
           </>
         )}
