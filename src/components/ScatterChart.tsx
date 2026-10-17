@@ -49,10 +49,28 @@ interface Box {
 const overlap = (a: Box, b: Box) =>
   Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
 
+/** The part of the chart in view, in rating units (the same span on both axes). */
+interface View {
+  x0: number
+  y0: number
+  span: number
+}
+/** The most you can zoom in: this many rating units across. */
+const MIN_SPAN = 3
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
 /** A round axis step giving at most eight intervals up to `max`. */
 function niceStep(max: number) {
-  for (const step of [1, 2, 5, 10, 20, 25, 50, 100]) if (Math.ceil(max / step) <= 8) return step
+  for (const step of [0.5, 1, 2, 5, 10, 20, 25, 50, 100]) if (Math.ceil(max / step) <= 8) return step
   return Math.ceil(max / 8)
+}
+
+/** Round ticks covering [from, to]. */
+function ticksFor(from: number, to: number) {
+  const step = niceStep(to - from)
+  const out: number[] = []
+  for (let t = Math.ceil(from / step - 1e-9) * step; t <= to + 1e-9; t += step) out.push(Math.round(t * 100) / 100)
+  return out
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null
@@ -96,22 +114,54 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
   const scaleTop = Math.max(21, top)
   const step = niceStep(scaleTop)
   const domain = Math.ceil(scaleTop / step) * step
-  const ticks = Array.from({ length: domain / step + 1 }, (_, i) => i * step)
+
+  // Zoom: null shows the whole chart. Kept inside the chart if the scale changes.
+  const [zoom, setZoom] = useState<View | null>(null)
+  const view: View =
+    zoom && zoom.span < domain
+      ? { span: zoom.span, x0: clamp(zoom.x0, 0, domain - zoom.span), y0: clamp(zoom.y0, 0, domain - zoom.span) }
+      : { x0: 0, y0: 0, span: domain }
+  const zoomed = view.span < domain
+  const xTicks = ticksFor(view.x0, view.x0 + view.span)
+  const yTicks = ticksFor(view.y0, view.y0 + view.span)
 
   const plotW = size.width - LEFT - RIGHT
   const plotH = size.height - TOP - BOTTOM
-  const x = (v: number) => LEFT + (v / domain) * plotW
-  const y = (v: number) => TOP + plotH - (v / domain) * plotH
+  const x = (v: number) => LEFT + ((v - view.x0) / view.span) * plotW
+  const y = (v: number) => TOP + plotH - ((v - view.y0) / view.span) * plotH
+  const inView = (e: number, v: number) => e >= view.x0 - 1e-9 && e <= view.x0 + view.span + 1e-9 && v >= view.y0 - 1e-9 && v <= view.y0 + view.span + 1e-9
+
+  /** Zooms by `factor` (above 1 zooms in) from `base`, keeping the point under (px, py) in place. */
+  const zoomFrom = (base: View, factor: number, px: number, py: number) => {
+    const span = clamp(base.span / factor, MIN_SPAN, domain)
+    if (span >= domain - 1e-6) return setZoom(null)
+    const fx = clamp((px - LEFT) / plotW, 0, 1)
+    const fy = clamp((TOP + plotH - py) / plotH, 0, 1)
+    const cx = base.x0 + fx * base.span
+    const cy = base.y0 + fy * base.span
+    setZoom({ span, x0: clamp(cx - fx * span, 0, domain - span), y0: clamp(cy - fy * span, 0, domain - span) })
+  }
+  const zoomBy = (factor: number) => zoomFrom(view, factor, LEFT + plotW / 2, TOP + plotH / 2)
 
   // Dragging: anything dropped on the plot snaps to the nearest Fibonacci point.
   const [drag, setDrag] = useState<Drag | null>(null)
   const dragRef = useRef<Drag | null>(null)
   const snapValues = FIB.filter((f) => f <= domain)
-  const nearest = (v: number) => snapValues.reduce((best, f) => (Math.abs(f - v) < Math.abs(best - v) ? f : best))
+  // Points that can be dropped on: the Fibonacci values in view on each axis.
+  const inRange = (from: number) => {
+    const list = snapValues.filter((f) => f >= from - 1e-9 && f <= from + view.span + 1e-9)
+    return list.length ? list : snapValues
+  }
+  const snapX = inRange(view.x0)
+  const snapY = inRange(view.y0)
+  const nearest = (v: number, list: number[]) => list.reduce((best, f) => (Math.abs(f - v) < Math.abs(best - v) ? f : best))
   const snapAt = (px: number, py: number) => {
     const inside = px > LEFT - 24 && px < LEFT + plotW + 24 && py > TOP - 24 && py < TOP + plotH + 24
     if (!inside) return null
-    return { effort: nearest(((px - LEFT) / plotW) * domain), value: nearest(((TOP + plotH - py) / plotH) * domain) }
+    return {
+      effort: nearest(view.x0 + ((px - LEFT) / plotW) * view.span, snapX),
+      value: nearest(view.y0 + ((TOP + plotH - py) / plotH) * view.span, snapY),
+    }
   }
   const snap = drag?.moved ? snapAt(drag.x, drag.y) : null
 
@@ -163,9 +213,85 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
       window.removeEventListener('touchmove', noScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging, domain, plotW, plotH])
+  }, [dragging, domain, plotW, plotH, view.x0, view.y0, view.span])
 
-  const groups = useMemo(() => {
+  // Moving around a zoomed-in chart by dragging its empty background.
+  const panRef = useRef<{ px: number; py: number; view: View; moved: boolean } | null>(null)
+  const pannedRef = useRef(false)
+  const startPan = (e: React.PointerEvent) => {
+    if (e.button !== 0 || !zoomed) return
+    panRef.current = { px: e.clientX, py: e.clientY, view, moved: false }
+    pannedRef.current = false
+    const move = (ev: PointerEvent) => {
+      const p = panRef.current
+      if (!p) return
+      const dx = ev.clientX - p.px
+      const dy = ev.clientY - p.py
+      if (!p.moved && Math.hypot(dx, dy) < 4) return
+      p.moved = true
+      pannedRef.current = true
+      const k = p.view.span / plotW
+      setZoom({ span: p.view.span, x0: clamp(p.view.x0 - dx * k, 0, domain - p.view.span), y0: clamp(p.view.y0 + dy * (p.view.span / plotH), 0, domain - p.view.span) })
+    }
+    const up = () => {
+      panRef.current = null
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  // Mouse wheel / trackpad pinch over the chart zooms (around the pointer); on a
+  // touchscreen, two fingers pinch. The latest view is read through a ref.
+  const zoomStateRef = useRef({ view, zoomFrom })
+  zoomStateRef.current = { view, zoomFrom }
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      const box = el.getBoundingClientRect()
+      const px = e.clientX - box.left
+      const py = e.clientY - box.top
+      if (px < LEFT || py > box.height - BOTTOM) return
+      e.preventDefault()
+      const { view, zoomFrom } = zoomStateRef.current
+      // Pinch gestures arrive as ctrl+wheel with small deltas.
+      zoomFrom(view, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025)), px, py)
+    }
+    let pinch: { dist: number; view: View } | null = null
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { dist: dist(e.touches), view: zoomStateRef.current.view }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return
+      e.preventDefault()
+      const box = el.getBoundingClientRect()
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - box.left
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - box.top
+      zoomStateRef.current.zoomFrom(pinch.view, dist(e.touches) / pinch.dist, mx, my)
+    }
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [])
+
+  const allGroups = useMemo(() => {
     const map = new Map<string, Ability[]>()
     for (const a of plotted) {
       const key = `${a.effort}:${a.value}`
@@ -179,6 +305,11 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abilities])
+  const groups = useMemo(
+    () => allGroups.filter((g) => inView(g.effort, g.value)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allGroups, view.x0, view.y0, view.span],
+  )
 
   // Too narrow for names beside the markers (phones): list them under the chart.
   const compact = plotW < 360
@@ -234,14 +365,18 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
     }
     return result
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, compact, fontSize, plotW, plotH, domain])
+  }, [groups, compact, fontSize, plotW, plotH, domain, view.x0, view.y0, view.span])
 
-  const midX = LEFT + plotW / 2
-  const midY = TOP + plotH / 2
+  const half = domain / 2
 
   return (
     <>
-      <div className={`chart${onRate ? ' editable' : ''}${onPropose ? ' proposing' : ''}${onPick ? ' pickable' : ''}${drag?.moved ? ' dragging' : ''}`} ref={boxRef}>
+      <div
+        className={`chart${onRate ? ' editable' : ''}${onPropose ? ' proposing' : ''}${onPick ? ' pickable' : ''}${drag?.moved ? ' dragging' : ''}${zoomed ? ' zoomed' : ''}`}
+        ref={boxRef}
+        // Zoomed in, one finger moves around the chart; otherwise it scrolls the page.
+        style={{ touchAction: zoomed ? 'none' : 'pan-y' }}
+      >
         <svg width={size.width} height={size.height} role="img" aria-label="Effort versus value scatter plot">
           {/* Low effort & high value (top left) shades green, high effort & low value
               (bottom right) red, each fading to white toward the middle. */}
@@ -254,6 +389,9 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
               <stop offset="0" stopColor="#d0101b" stopOpacity="0.26" />
               <stop offset="1" stopColor="#d0101b" stopOpacity="0" />
             </linearGradient>
+            <clipPath id="ev-plot">
+              <rect x={LEFT} y={TOP} width={plotW} height={plotH} />
+            </clipPath>
           </defs>
           <rect
             className="plot-bg"
@@ -261,29 +399,35 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
             y={TOP}
             width={plotW}
             height={plotH}
+            onPointerDown={startPan}
             onClick={(e) => {
               // Proposing: a click anywhere puts the suggestion on the nearest point.
-              if (!onPropose) return
+              if (!onPropose || pannedRef.current) return
               const box = boxRef.current!.getBoundingClientRect()
               const target = snapAt(e.clientX - box.left, e.clientY - box.top)
               if (target) onPropose(target.effort, target.value)
             }}
           />
-          <rect x={LEFT} y={TOP} width={plotW / 2} height={plotH / 2} fill="url(#ev-good)" pointerEvents="none" />
-          <rect x={midX} y={midY} width={plotW / 2} height={plotH / 2} fill="url(#ev-bad)" pointerEvents="none" />
-
-          {/* Grid & ticks */}
-          {ticks.map((t) => (
-            <g key={t}>
-              <line className="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + plotH} />
-              <line className="grid" x1={LEFT} x2={LEFT + plotW} y1={y(t)} y2={y(t)} />
-              <text className="tick" x={x(t)} y={TOP + plotH + 18} textAnchor="middle">
-                {t}
-              </text>
-              <text className="tick" x={LEFT - 10} y={y(t) + 4} textAnchor="end">
-                {t}
-              </text>
-            </g>
+          <g clipPath="url(#ev-plot)">
+            {/* The shaded corners are placed in rating units, so they move with the zoom. */}
+            <rect x={x(0)} y={y(domain)} width={x(half) - x(0)} height={y(half) - y(domain)} fill="url(#ev-good)" pointerEvents="none" />
+            <rect x={x(half)} y={y(half)} width={x(domain) - x(half)} height={y(0) - y(half)} fill="url(#ev-bad)" pointerEvents="none" />
+            {xTicks.map((t) => (
+              <line key={`x${t}`} className="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + plotH} />
+            ))}
+            {yTicks.map((t) => (
+              <line key={`y${t}`} className="grid" x1={LEFT} x2={LEFT + plotW} y1={y(t)} y2={y(t)} />
+            ))}
+          </g>
+          {xTicks.map((t) => (
+            <text key={`xt${t}`} className="tick" x={x(t)} y={TOP + plotH + 18} textAnchor="middle">
+              {t}
+            </text>
+          ))}
+          {yTicks.map((t) => (
+            <text key={`yt${t}`} className="tick" x={LEFT - 10} y={y(t) + 4} textAnchor="end">
+              {t}
+            </text>
           ))}
           <rect className="frame" x={LEFT} y={TOP} width={plotW} height={plotH} />
           <text className="axis-title" x={LEFT + plotW / 2} y={size.height - 6} textAnchor="middle">
@@ -293,6 +437,7 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
             Value →
           </text>
 
+          <g clipPath="url(#ev-plot)">
           {/* Leader lines for names that had to move away from their marker */}
           {groups.map((g) => {
             const p = placements.get(g.key)
@@ -397,8 +542,8 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
                   <line className="snap-guide" x1={LEFT} x2={LEFT + plotW} y1={y(snap.value)} y2={y(snap.value)} />
                 </>
               )}
-              {snapValues.flatMap((e) =>
-                snapValues.map((v) => (
+              {snapX.flatMap((e) =>
+                snapY.map((v) => (
                   <circle
                     key={`${e}:${v}`}
                     className={`snap-dot${snap?.effort === e && snap.value === v ? ' active' : ''}`}
@@ -410,7 +555,22 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
               )}
             </g>
           )}
+          </g>
         </svg>
+
+        <div className="chart-zoom" onPointerDown={(e) => e.stopPropagation()}>
+          <button type="button" className="icon" onClick={() => zoomBy(1 / 1.5)} disabled={!zoomed} aria-label="Zoom out" title="Zoom out">
+            −
+          </button>
+          <button type="button" className="icon" onClick={() => zoomBy(1.5)} disabled={view.span <= MIN_SPAN + 1e-6} aria-label="Zoom in" title="Zoom in (or scroll / pinch on the chart)">
+            +
+          </button>
+          {zoomed && (
+            <button type="button" className="small" onClick={() => setZoom(null)} title="Show the whole chart">
+              Fit
+            </button>
+          )}
+        </div>
 
         {drag?.moved && (
           <div className={`drag-ghost${drag.x > size.width - 190 ? ' flip' : ''}`} style={{ left: drag.x, top: Math.max(24, Math.min(size.height - 24, drag.y)) }}>
@@ -441,9 +601,9 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
           )
         })}
       </div>
-      {compact && groups.length > 0 && (
+      {compact && allGroups.length > 0 && (
         <ul className="chart-legend">
-          {[...groups]
+          {[...allGroups]
             .sort((a, b) => b.value - a.value || a.effort - b.effort)
             .map((g) => (
               <li key={g.key} className={g.items.some((a) => a.id === highlight) ? 'hot' : undefined}>

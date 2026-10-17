@@ -2942,3 +2942,23 @@ button.icon.armed {
 .group-link:hover {
   text-decoration: underline;
 }
+
+/* E/V chart zoom buttons, in the plot's top-right corner. */
+.chart-zoom {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+}
+.chart-zoom button {
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+}
+.chart.zoomed .plot-bg {
+  cursor: grab;
+}
+.chart.zoomed .plot-bg:active {
+  cursor: grabbing;
+}
