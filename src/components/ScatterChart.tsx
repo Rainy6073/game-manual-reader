@@ -89,9 +89,13 @@ export default function ScatterChart({ abilities, highlight, onHighlight, onRate
   const plotted = abilities.filter((a) => a.effort != null && a.value != null)
   const unplotted = abilities.filter((a) => a.effort == null || a.value == null)
   // Show the scale up to at least 13, or further when something is rated higher.
-  const maxUsed = Math.max(13, ...plotted.flatMap((a) => [a.effort!, a.value!]))
-  const step = niceStep(maxUsed)
-  const domain = Math.ceil(maxUsed / step) * step
+  // Show the scale one Fibonacci step past the highest rating in use (at least 21),
+  // so there is always room to drag a point higher.
+  const maxUsed = Math.max(0, ...plotted.flatMap((a) => [a.effort!, a.value!]), ...(proposal ? [proposal.effort ?? 0, proposal.value ?? 0] : []))
+  const top = FIB.find((f) => f > maxUsed) ?? FIB[FIB.length - 1]
+  const scaleTop = Math.max(21, top)
+  const step = niceStep(scaleTop)
+  const domain = Math.ceil(scaleTop / step) * step
   const ticks = Array.from({ length: domain / step + 1 }, (_, i) => i * step)
 
   const plotW = size.width - LEFT - RIGHT
