@@ -31,6 +31,32 @@ const MAX_SCALE = 4
 const MARGIN = 250
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
 
+/** Where this device was reading, per manual (by name and page count). */
+const POSITION_KEY = 'kickoff.readerPosition'
+interface SavedPosition {
+  doc: string
+  page: number
+  fy: number
+  /** The zoom, only when it was set by hand (otherwise pages fit the width). */
+  scale: number | null
+}
+const docKey = (l: { name: string; doc: { numPages: number } }) => `${l.name}|${l.doc.numPages}`
+function readSavedPosition(l: { name: string; doc: { numPages: number } }): SavedPosition | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? 'null') as SavedPosition | null
+    return saved?.doc === docKey(l) ? saved : null
+  } catch {
+    return null
+  }
+}
+function savePosition(l: { name: string; doc: { numPages: number } }, pos: { page: number; fy: number }, scale: number | null) {
+  try {
+    localStorage.setItem(POSITION_KEY, JSON.stringify({ doc: docKey(l), ...pos, scale } satisfies SavedPosition))
+  } catch {
+    // Storage unavailable; the position just isn't remembered.
+  }
+}
+
 interface Loaded {
   doc: PDFDoc
   name: string
@@ -100,6 +126,10 @@ export default function ManualReader({ source, empty, actions, onReference, jump
   const scaleRef = useRef(scale)
   const currentPageRef = useRef(currentPage)
   currentPageRef.current = currentPage
+  // Where the reader is: the page at the top of the view and how far down it the
+  // view starts (0–1). Kept through zooming, refitting, hiding the viewer and
+  // leaving the page, so the manual reopens where it was.
+  const positionRef = useRef<{ page: number; fy: number } | null>(null)
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchFocus, setSearchFocus] = useState(0)
@@ -197,17 +227,30 @@ export default function ManualReader({ source, empty, actions, onReference, jump
   const withMarginRef = useRef(withMargin)
   withMarginRef.current = withMargin
 
-  // Fit the page width to the viewer once a document loads. If the viewer is
-  // hidden at that moment (e.g. behind the Question Board), fit when it appears.
+  /** Changes the zoom while keeping the current reading position at the top of the view. */
+  const rescale = (next: number) => {
+    const pos = positionRef.current
+    if (pos) anchorRef.current = { page: pos.page, fx: 0, fy: pos.fy, x: 0, y: 0 }
+    setScale(next)
+  }
+
+  // Fit the page width to the viewer once a document loads (or use the zoom saved
+  // for this manual). If the viewer is hidden at that moment (e.g. behind the
+  // Question Board), fit when it appears.
   useEffect(() => {
     const viewer = viewerRef.current
     if (!loaded || !viewer) return
-    autoFitRef.current = true
+    const saved = readSavedPosition(loaded)
+    autoFitRef.current = saved?.scale == null
+    if (saved?.scale != null) {
+      rescale(clampScale(saved.scale))
+      return
+    }
     const fit = () => {
       const available = viewer.clientWidth - 48 - (withMarginRef.current ? MARGIN : 0)
       if (available <= 0) return false
       const widest = Math.max(...loaded.sizes.map((s) => s.width))
-      setScale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
+      rescale(Math.min(1.5, Math.max(MIN_SCALE, available / widest)))
       return true
     }
     if (fit()) return
@@ -227,7 +270,7 @@ export default function ManualReader({ source, empty, actions, onReference, jump
       const available = viewer.clientWidth - 48 - (withMargin ? MARGIN : 0)
       const fitted = Math.min(1.5, Math.max(MIN_SCALE, available / widest))
       // Zoomed by hand: only shrink if the page no longer fits beside the notes.
-      if (autoFitRef.current ? Math.abs(fitted - scaleRef.current) > 0.01 : withMargin && widest * scaleRef.current > available) setScale(fitted)
+      if (autoFitRef.current ? Math.abs(fitted - scaleRef.current) > 0.01 : withMargin && widest * scaleRef.current > available) rescale(fitted)
     }, 200)
     return () => clearTimeout(t)
   }, [withMargin, loaded, viewerWidth])
@@ -395,9 +438,21 @@ export default function ManualReader({ source, empty, actions, onReference, jump
     const onScroll = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
+        // A hidden viewer reports a scroll of 0; that isn't where the reader is.
+        if (viewer.clientWidth === 0 || restoringRef.current) return
         const mid = viewer.scrollTop + viewer.clientHeight / 3
         const pages = viewer.querySelectorAll<HTMLElement>('[data-page]')
         if (pages.length === 0) return
+        let topEl = pages[0]
+        for (const el of pages) {
+          if (el.offsetTop <= viewer.scrollTop) topEl = el
+          else break
+        }
+        positionRef.current = {
+          page: Number(topEl.dataset.page),
+          fy: Math.max(0, (viewer.scrollTop - topEl.offsetTop) / topEl.offsetHeight),
+        }
+        if (!element) savePosition(loaded, positionRef.current, autoFitRef.current ? null : scaleRef.current)
         let page = Number(pages[0].dataset.page)
         for (const el of pages) {
           if (el.offsetTop <= mid) page = Number(el.dataset.page)
@@ -412,7 +467,44 @@ export default function ManualReader({ source, empty, actions, onReference, jump
       viewer.removeEventListener('scroll', onScroll)
       cancelAnimationFrame(frame)
     }
-  }, [loaded])
+  }, [loaded, element])
+
+  /** Scrolls back to the remembered reading position. */
+  const restoringRef = useRef(false)
+  const restorePosition = useCallback(() => {
+    const viewer = viewerRef.current
+    const pos = positionRef.current
+    if (!viewer || !pos || viewer.clientWidth === 0) return
+    const el = viewer.querySelector<HTMLElement>(`[data-page="${pos.page}"]`)
+    if (!el) return
+    restoringRef.current = true
+    viewer.scrollTop = el.offsetTop + pos.fy * el.offsetHeight
+    setCurrentPage(pos.page)
+    setPageInput(String(pos.page))
+    requestAnimationFrame(() => (restoringRef.current = false))
+  }, [])
+
+  // A newly opened manual starts where this device left off in it.
+  useLayoutEffect(() => {
+    if (!loaded) return
+    const saved = readSavedPosition(loaded)
+    positionRef.current = saved ? { page: Math.min(loaded.doc.numPages, Math.max(1, saved.page)), fy: saved.fy } : null
+    restorePosition()
+  }, [loaded, restorePosition])
+
+  // Browsers reset the scroll of a hidden element (the manual behind the Question
+  // Board, or the other pane on a phone), so put it back when the viewer reappears.
+  const wasHiddenRef = useRef(false)
+  useLayoutEffect(() => {
+    if (viewerWidth === 0) {
+      wasHiddenRef.current = true
+      return
+    }
+    if (wasHiddenRef.current) {
+      wasHiddenRef.current = false
+      restorePosition()
+    }
+  }, [viewerWidth, restorePosition])
 
   // --- Zoom -------------------------------------------------------------
 
